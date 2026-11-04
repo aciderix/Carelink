@@ -18,7 +18,6 @@ class SurveillanceUiTest {
         }
         compose.onNodeWithText("Poste veilleur").assertIsDisplayed()
         compose.onNodeWithText("Téléphone chambre").performScrollTo().assertIsDisplayed()
-        compose.onNodeWithText("CareLink complète les rondes et les procédures du service. Un niveau sonore ne prouve ni un réveil, ni un besoin d’aide.").performScrollTo().assertIsDisplayed()
         compose.onAllNodesWithText("Utiliser ce mode")[0].performScrollTo().performClick()
         compose.onNodeWithText("Votre veille").assertIsDisplayed()
         compose.onNodeWithText("Ajouter une chambre").performScrollTo()

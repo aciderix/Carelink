@@ -4,9 +4,9 @@ Application Android de détection sonore et de communication sur réseau local, 
 
 ## Télécharger la version d’essai
 
-L’APK d’essai est inclus dans cette branche : **[CareLink 2.0.2-debug — télécharger](https://github.com/aciderix/Carelink/raw/refs/heads/carelink-v2-ameliorations-apk/downloads/CareLink-2.0.2-debug.apk)**. Depuis GitHub, ouvrir le fichier puis utiliser **Download raw file** si nécessaire. Le bouton **Code → Download ZIP** récupère aussi les sources et l’APK.
+L’APK d’essai est inclus dans cette branche : **[CareLink 2.0.3-debug — télécharger](https://github.com/aciderix/Carelink/raw/refs/heads/carelink-v2-ameliorations-apk/downloads/CareLink-2.0.3-debug.apk)**. Depuis GitHub, ouvrir le fichier puis utiliser **Download raw file** si nécessaire. Le bouton **Code → Download ZIP** récupère aussi les sources et l’APK.
 
-- [Dossier de téléchargement](downloads/) et [empreinte SHA-256](downloads/CareLink-2.0.2-debug.apk.sha256).
+- [Dossier de téléchargement](downloads/) et [empreinte SHA-256](downloads/CareLink-2.0.3-debug.apk.sha256).
 - [Résultats de validation](docs/RESULTATS_VALIDATION.md) et [consignes de qualification](docs/VALIDATION.md).
 - [Aperçu de l’accueil](docs/screenshots/welcome.png) et [tableau de surveillance](docs/screenshots/monitor-empty.png).
 

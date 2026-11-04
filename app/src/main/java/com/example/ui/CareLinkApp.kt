@@ -279,11 +279,9 @@ private suspend fun delayForPin() = kotlinx.coroutines.delay(1500)
 
 @Composable private fun Welcome(modifier: Modifier, start: (DeviceRole) -> Unit) {
     Column(modifier.verticalScroll(rememberScrollState()).padding(24.dp), verticalArrangement = Arrangement.spacedBy(24.dp)) {
-        Text("Une veille plus claire.\nUne présence humaine, toujours.", style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Bold)
         Text("Choisissez le rôle de ce téléphone. Les chambres s’associent uniquement avec votre autorisation.", color = Quiet)
         FeatureCard("Poste veilleur", "Recevoir les événements, suivre les chambres attendues et échanger avec un résident.", Icons.Default.SpaceDashboard, Mint) { start(DeviceRole.MONITOR_UNIT) }
         FeatureCard("Téléphone chambre", "Capturer l’activité sonore et transmettre les événements aux veilleurs appairés.", Icons.Default.Sensors, Amber) { start(DeviceRole.ROOM_UNIT) }
-        Note("CareLink complète les rondes et les procédures du service. Un niveau sonore ne prouve ni un réveil, ni un besoin d’aide.")
     }
 }
 @Composable private fun FeatureCard(title: String, body: String, icon: ImageVector, tint: Color, action: () -> Unit) {

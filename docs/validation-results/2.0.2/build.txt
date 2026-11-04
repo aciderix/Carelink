@@ -1,0 +1,6 @@
+CareLink 2.0.2-debug
+
+assembleDebug, testDebugUnitTest, assembleDebugAndroidTest et lintDebug : BUILD SUCCESSFUL.
+36 tests JVM : aucun échec, aucune erreur, aucun test ignoré.
+Signature de développement : identique aux versions 2.0.0 et 2.0.1.
+Lint ne signale pas d’erreur bloquante ; des avertissements subsistent.

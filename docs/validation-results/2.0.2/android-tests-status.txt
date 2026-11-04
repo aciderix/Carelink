@@ -1,0 +1,3 @@
+CareLink 2.0.2-debug
+
+Les 5 tests instrumentés sont compilés, mais non exécutés pour cette livraison. La tentative antérieure sur émulateur Android 15 n’a pas abouti : l’environnement ne terminait pas son démarrage avant installation de CareLink. Cette limite est archivée avec les résultats 2.0.1. Aucun succès d’exécution native n’est revendiqué pour 2.0.2.

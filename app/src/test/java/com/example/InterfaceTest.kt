@@ -43,7 +43,6 @@ class InterfaceTest {
         compose.onNodeWithText("Poste veilleur").assertIsDisplayed()
         screenshot("welcome")
         compose.onNodeWithText("Téléphone chambre").performScrollTo().assertIsDisplayed()
-        compose.onNodeWithText("CareLink complète les rondes et les procédures du service. Un niveau sonore ne prouve ni un réveil, ni un besoin d’aide.").performScrollTo().assertIsDisplayed()
     }
     @Test fun monitorDoesNotInventRoomsAndHonorsDisabledCodeEvenWhenAPinIsStored() {
         val hash = AdminPin.hash("123456")
