@@ -28,8 +28,9 @@ Définir à l’avance les événements acoustiques cibles et les critères d’
 
 - Appareil inconnu, certificat différent/expiré, code expiré ou déjà consommé, token incorrect, appareil révoqué, trames malformées/surdimensionnées et rejeu de transitions.
 - TLS sans repli en clair sur les trois canaux. Aucun audio accessible avant authentification. Révocation effective des sessions ouvertes.
+- Protection par code activée puis désactivée depuis les réglages : son état doit être visible immédiatement et l’ajout d’une chambre ne doit plus demander le code lorsqu’il est désactivé, même si un code est enregistré. Vérifier aussi la réactivation et son annulation.
 - Secrets chiffrés et exclus des sauvegardes ; aucun nom ni code d’appairage dans les logs. Écran protégé contre les captures en production ; pas d’audio enregistré.
-- Journal limité au nécessaire et accès Android protégé. Le code professionnel protège des manipulations dans l’interface : il ne remplace pas un appareil géré ni un compte nominatif professionnel. L’acteur technique du journal est l’appareil authentifié.
+- Journal limité au nécessaire et accès Android protégé. Lorsqu’il est activé, le code professionnel protège des manipulations dans l’interface : il ne remplace pas un appareil géré ni un compte nominatif professionnel. L’acteur technique du journal est l’appareil authentifié.
 
 ## Procédure de vacation et escalade
 

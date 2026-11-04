@@ -29,12 +29,15 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.core.graphics.drawable.toBitmap
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.data.PreferencesManager
+import com.example.BuildConfig
 import com.example.model.*
 import com.example.security.AdminPin
 import com.example.service.*
@@ -80,6 +83,7 @@ private fun clock(time: Long) = SimpleDateFormat("dd MMM · HH:mm:ss", Locale.FR
 fun CareLinkApp(vm: MainViewModel, startRole: (DeviceRole) -> Unit,
     requestMicrophone: (() -> Unit) -> Unit, requestCamera: (() -> Unit) -> Unit, openRoom: String?) {
     val role by vm.role.collectAsStateWithLifecycle()
+    val codeProtectionEnabled by vm.codeProtectionEnabled.collectAsStateWithLifecycle()
     val room by vm.room.collectAsStateWithLifecycle()
     val monitor by vm.monitor.collectAsStateWithLifecycle()
     val message by vm.message.collectAsStateWithLifecycle()
@@ -102,9 +106,9 @@ fun CareLinkApp(vm: MainViewModel, startRole: (DeviceRole) -> Unit,
     var protectedAction by remember { mutableStateOf<(() -> Unit)?>(null) }
     var pinDialog by remember { mutableStateOf(false) }
     var setupPin by remember { mutableStateOf(false) }
-    fun protect(label: String, requireProtection: Boolean = false, action: () -> Unit) {
+    fun protect(label: String, action: () -> Unit) {
         protectedAction = action; confirmLabel = label
-        if (vm.prefs.isRoleLocked || requireProtection) {
+        if (vm.prefs.isRoleLocked) {
             setupPin = vm.prefs.pinHash.isBlank()
             pinDialog = true
         }
@@ -125,13 +129,12 @@ fun CareLinkApp(vm: MainViewModel, startRole: (DeviceRole) -> Unit,
             if (accepted) {
                 if (setupMode) {
                     vm.prefs.pinHash = withContext(Dispatchers.Default) { AdminPin.hash(pin) }
-                    vm.prefs.isRoleLocked = true
+                    vm.setCodeProtection(true)
                     setupPin = false
                     vm.message.value = "Réglages protégés"
-                } else {
-                    val action = protectedAction; protectedAction = null; confirmLabel = null; action?.invoke()
                 }
                 pinDialog = false
+                val action = protectedAction; protectedAction = null; confirmLabel = null; action?.invoke()
             }
             accepted
         }
@@ -139,6 +142,7 @@ fun CareLinkApp(vm: MainViewModel, startRole: (DeviceRole) -> Unit,
     }
     val selected = monitor.monitoredRooms.find { it.id == detailId }
     BackHandler(detailId != null) { detailId = null }
+    BackHandler(addRoom) { addRoom = false; scan = false }
     LaunchedEffect(tab) { if (tab == 2) vm.reloadPeers() }
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
@@ -146,17 +150,17 @@ fun CareLinkApp(vm: MainViewModel, startRole: (DeviceRole) -> Unit,
         topBar = {
             CenterAlignedTopAppBar(title = {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(9.dp)) {
-                    Icon(Icons.Default.HealthAndSafety, null, tint = Mint)
+                    CareLinkIcon()
                     Text("CareLink", fontWeight = FontWeight.Bold)
                 }
             }, navigationIcon = {
-                if (detailId != null) IconButton(onClick = { detailId = null }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Retour") }
+                if (addRoom || detailId != null) IconButton(onClick = { if (addRoom) { addRoom = false; scan = false } else detailId = null }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Retour") }
             }, actions = {
-                if (role != DeviceRole.NONE) IconButton(onClick = { protect("Ouvrir les réglages professionnels ?") { tab = 2; detailId = null } }) { Icon(Icons.Default.Tune, "Réglages et diagnostic") }
+                if (role != DeviceRole.NONE && !addRoom) IconButton(onClick = { protect("Ouvrir les réglages professionnels ?") { tab = 2; detailId = null } }) { Icon(Icons.Default.Tune, "Réglages et diagnostic") }
             })
         },
         bottomBar = {
-            if (role != DeviceRole.NONE) NavigationBar(containerColor = Panel) {
+            if (role != DeviceRole.NONE && !addRoom) NavigationBar(containerColor = Panel) {
                 listOf("Surveillance" to Icons.Default.SpaceDashboard, "Événements" to Icons.Default.Notifications,
                     "Réglages" to Icons.Default.Tune).forEachIndexed { i, entry ->
                     NavigationBarItem(selected = tab == i, onClick = { if (i == 2) protect("Ouvrir les réglages professionnels ?") { tab = 2; detailId = null } else { tab = i; detailId = null } },
@@ -170,27 +174,33 @@ fun CareLinkApp(vm: MainViewModel, startRole: (DeviceRole) -> Unit,
             val width = Modifier.widthIn(max = 900.dp).fillMaxWidth()
             when {
                 role == DeviceRole.NONE -> Welcome(width, startRole)
-                tab == 2 -> SettingsPanel(width, vm, role, monitor.notificationWarnings, peers,
+                addRoom -> AddRoomScreen(width, monitor, scan,
+                    startScan = { requestCamera { if (addRoom) scan = true } },
+                    submit = { vm.importPairing(it); scan = false; addRoom = false },
+                    error = { vm.message.value = it; scan = false },
+                    cancel = { addRoom = false; scan = false })
+                tab == 2 -> SettingsPanel(width, vm, role, codeProtectionEnabled, monitor.notificationWarnings, peers,
                     stop = { protect("Arrêter la surveillance sur ce téléphone ?") { vm.stop(); tab = 0 } },
                     enableLock = {
-                        if (vm.prefs.pinHash.isBlank()) { setupPin = true; pinDialog = true }
-                        else protect("Activer la protection des réglages ?", requireProtection = true) { vm.prefs.isRoleLocked = true }
+                        protectedAction = { vm.setCodeProtection(true); vm.message.value = "Protection par code activée" }
+                        confirmLabel = "Activer la protection des réglages ?"
+                        setupPin = vm.prefs.pinHash.isBlank(); pinDialog = true
                     },
-                    disableLock = { protect("Désactiver la protection des réglages ?") { vm.prefs.isRoleLocked = false; vm.message.value = "Protection désactivée" } },
-                    test = { protect("Envoyer un événement de test ?", requireProtection = true) { vm.test() } },
-                    pair = { protect("Ouvrir un appairage à usage unique pendant deux minutes ?", requireProtection = true) { vm.newPairing() } },
-                    revoke = { id -> protect("Révoquer l’accès de ce veilleur ?", requireProtection = true) { vm.revoke(id) } })
+                    disableLock = { protect("Désactiver la protection des réglages ?") { vm.setCodeProtection(false); vm.message.value = "Protection désactivée" } },
+                    test = { protect("Envoyer un événement de test ?") { vm.test() } },
+                    pair = { protect("Ouvrir un appairage à usage unique pendant deux minutes ?") { vm.newPairing() } },
+                    revoke = { id -> protect("Révoquer l’accès de ce veilleur ?") { vm.revoke(id) } })
                 role == DeviceRole.ROOM_UNIT -> RoomHome(width, room, vm,
                     resume = { startRole(DeviceRole.ROOM_UNIT) },
-                    pair = { protect("Appairer un poste veilleur ?", requireProtection = true) { vm.newPairing() } })
+                    pair = { protect("Appairer un poste veilleur ?") { vm.newPairing() } })
                 tab == 1 -> EventList(width, monitor.history, monitor.pendingActions, vm::eventAction)
                 selected != null -> RoomDetail(width, selected, monitor, vm,
                     listen = { vm.listen(selected.id) }, talk = { talkId = selected.id },
-                    threshold = { value -> protect("Appliquer un seuil relatif de $value ?", requireProtection = true) { vm.remoteThreshold(selected.id, value) } },
-                    updateAddress = { address -> protect("Utiliser cette adresse réseau pour la chambre ?", requireProtection = true) { vm.updateAddress(selected.id, address) } },
-                    pair = { protect("Reprendre l’appairage avec un nouveau QR ?", requireProtection = true) { addRoom = true } },
-                    forget = { protect("Retirer cette chambre des appareils attendus ? Ses événements seront conservés.", requireProtection = true) { vm.forget(selected.id); detailId = null } })
-                else -> Dashboard(width, monitor, add = { protect("Appairer une nouvelle chambre ?", requireProtection = true) { addRoom = true } },
+                    threshold = { value -> protect("Appliquer un seuil relatif de $value ?") { vm.remoteThreshold(selected.id, value) } },
+                    updateAddress = { address -> protect("Utiliser cette adresse réseau pour la chambre ?") { vm.updateAddress(selected.id, address) } },
+                    pair = { protect("Reprendre l’appairage avec un nouveau QR ?") { addRoom = true } },
+                    forget = { protect("Retirer cette chambre des appareils attendus ? Ses événements seront conservés.") { vm.forget(selected.id); detailId = null } })
+                else -> Dashboard(width, monitor, add = { protect("Appairer une nouvelle chambre ?") { addRoom = true } },
                     select = { detailId = it }, events = { tab = 1 }, resume = { startRole(DeviceRole.MONITOR_UNIT) })
             }
         }
@@ -212,24 +222,6 @@ fun CareLinkApp(vm: MainViewModel, startRole: (DeviceRole) -> Unit,
                 (context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(clip)
             }) { Text("Copier le code à la place") }
         } }, confirmButton = { TextButton(onClick = vm::cancelPairing) { Text("Fermer et annuler le code") } })
-    if (addRoom) {
-        var input by remember { mutableStateOf("") }
-        AlertDialog(onDismissRequest = { addRoom = false; scan = false }, title = { Text("Ajouter une chambre") },
-            text = { Column(Modifier.heightIn(max = 560.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text("Les chambres sont recherchées automatiquement sur le Wi-Fi. Le QR autorise le premier accès ; un appareil détecté n’est pas encore appairé.")
-                Text(monitor.discoveryDiagnostic, style = MaterialTheme.typography.bodySmall, color = Quiet)
-                val known = monitor.monitoredRooms.map { it.id }.toSet()
-                val nearby = monitor.nearbyRooms.filterNot { it.id in known }.take(5)
-                if (nearby.isEmpty()) Text("Aucune nouvelle chambre détectée. Le scan QR fonctionne aussi sans découverte réseau.", style = MaterialTheme.typography.bodySmall)
-                nearby.forEach { found ->
-                    Text("Chambre détectée · ${found.id.take(8)} · ${found.ipAddress}", style = MaterialTheme.typography.bodySmall, color = Mint)
-                }
-                if (scan) PairingCamera(Modifier.fillMaxWidth().height(300.dp), onCode = { vm.importPairing(it); scan = false; addRoom = false }, onError = { vm.message.value = it; scan = false })
-                else Button(onClick = { requestCamera { scan = true } }, Modifier.fillMaxWidth()) { Icon(Icons.Default.QrCodeScanner, null); Spacer(Modifier.width(8.dp)); Text("Scanner le QR") }
-                OutlinedTextField(input, { input = it.take(12000) }, label = { Text("Ou coller le code CL2…") }, modifier = Modifier.fillMaxWidth(), maxLines = 3)
-            } }, confirmButton = { TextButton(enabled = input.startsWith("CL2."), onClick = { vm.importPairing(input); addRoom = false }) { Text("Appairer") } },
-            dismissButton = { TextButton(onClick = { addRoom = false; scan = false }) { Text("Annuler") } })
-    }
     if (talkId != null) {
         val id = talkId!!
         var holding by remember { mutableStateOf(false) }
@@ -248,6 +240,39 @@ fun CareLinkApp(vm: MainViewModel, startRole: (DeviceRole) -> Unit,
                 Text("L’écoute distante est coupée pendant la parole. L’analyse de la chambre est suspendue pendant l’interphone.", style = MaterialTheme.typography.bodySmall, color = Amber)
             } }, confirmButton = { TextButton(onClick = { vm.stopSpeaking(); talkId = null }) { Text("Terminer") } })
     }
+}
+
+@Composable private fun AddRoomScreen(modifier: Modifier, state: MonitorMonitoringService.MonitorServiceState,
+    scan: Boolean, startScan: () -> Unit, submit: (String) -> Unit, error: (String) -> Unit, cancel: () -> Unit) {
+    var input by remember { mutableStateOf("") }
+    val known = state.monitoredRooms.map { it.id }.toSet()
+    val nearby = state.nearbyRooms.filterNot { it.id in known }
+    Column(modifier.fillMaxHeight().imePadding().verticalScroll(rememberScrollState()).padding(24.dp),
+        verticalArrangement = Arrangement.spacedBy(18.dp)) {
+        Text("Ajouter une chambre", style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Bold)
+        Text("Ouvrez un nouveau QR sur le téléphone chambre. Le QR autorise le premier accès ; un appareil détecté n’est pas encore appairé.", color = Quiet)
+        if (scan) PairingCamera(Modifier.fillMaxWidth().height(300.dp), onCode = submit, onError = error)
+        else Button(startScan, Modifier.fillMaxWidth().heightIn(min = 56.dp)) {
+            Icon(Icons.Default.QrCodeScanner, null); Spacer(Modifier.width(8.dp)); Text("Scanner le QR")
+        }
+        OutlinedTextField(input, { input = it.take(12000) }, label = { Text("Ou coller le code CL2…") }, modifier = Modifier.fillMaxWidth(), maxLines = 3)
+        OutlinedButton(onClick = { submit(input) }, enabled = input.startsWith("CL2."), modifier = Modifier.fillMaxWidth()) { Text("Appairer avec le code") }
+        HorizontalDivider(color = Color(0xFF2D4059))
+        Text("Chambres détectées sur le réseau", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+        Text(state.discoveryDiagnostic, style = MaterialTheme.typography.bodySmall, color = Quiet)
+        if (nearby.isEmpty()) Text("Aucune nouvelle chambre détectée. Le scan QR fonctionne aussi sans découverte réseau.", style = MaterialTheme.typography.bodyMedium, color = Quiet)
+        nearby.forEach { found -> Text("Chambre détectée · ${found.id.take(8)} · ${found.ipAddress}", color = Mint) }
+        OutlinedButton(cancel, Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text("Annuler") }
+    }
+}
+
+@Composable private fun CareLinkIcon() {
+    val context = LocalContext.current
+    val size = with(LocalDensity.current) { 36.dp.roundToPx() }
+    val icon = remember(context, size) {
+        context.applicationInfo.loadIcon(context.packageManager).toBitmap(size, size).asImageBitmap()
+    }
+    Image(icon, contentDescription = null, modifier = Modifier.size(36.dp).clip(RoundedCornerShape(10.dp)))
 }
 
 private suspend fun delayForPin() = kotlinx.coroutines.delay(1500)
@@ -424,7 +449,7 @@ private suspend fun delayForPin() = kotlinx.coroutines.delay(1500)
     if (resolve) AlertDialog(onDismissRequest = { resolve = false }, title = { Text("Résoudre cet événement ?") }, text = { Text("Vérifiez la situation et l’état de surveillance avant de clôturer. Cette action restera dans l’historique.") },
         confirmButton = { TextButton(onClick = { resolve = false; action(event, true) }) { Text("Confirmer la résolution") } }, dismissButton = { TextButton(onClick = { resolve = false }) { Text("Annuler") } })
 }
-@Composable private fun SettingsPanel(modifier: Modifier, vm: MainViewModel, role: DeviceRole, warnings: List<String>, peers: List<String>, stop: () -> Unit,
+@Composable private fun SettingsPanel(modifier: Modifier, vm: MainViewModel, role: DeviceRole, codeProtectionEnabled: Boolean, warnings: List<String>, peers: List<String>, stop: () -> Unit,
     enableLock: () -> Unit, disableLock: () -> Unit, test: () -> Unit, pair: () -> Unit, revoke: (String) -> Unit) {
     val context = LocalContext.current
     var name by remember { mutableStateOf(vm.prefs.roomName) }
@@ -434,14 +459,14 @@ private suspend fun delayForPin() = kotlinx.coroutines.delay(1500)
     var repeat by remember { mutableStateOf(vm.prefs.isAlertRepeatEnabled) }
     var interval by remember { mutableFloatStateOf(vm.prefs.alertRepeatIntervalSeconds.toFloat()) }
     var label by remember { mutableStateOf(vm.prefs.deviceLabel) }
-    // This page is entered through the professional-code gate; it is left on backgrounding.
+    // When code protection is enabled this page is guarded, and it is left on backgrounding.
     fun saveRoom() {
         vm.roomSettings(name, threshold.toInt(), duration.toInt())
         vm.message.value = "Réglages enregistrés"
     }
     LazyColumn(modifier, contentPadding = PaddingValues(24.dp), verticalArrangement = Arrangement.spacedBy(18.dp)) {
         item { Text("Réglages du poste", style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Bold); Text("Configuration et disponibilité", color = Quiet) }
-        item { Note("Version 2.0.1 · appairage sécurisé requis sur tous les téléphones. Aucun téléphone d’une ancienne version ne peut se connecter.") }
+        item { Note("Version ${BuildConfig.VERSION_NAME} · Utilisez la même version sur les chambres et les veilleurs.") }
         if (role == DeviceRole.ROOM_UNIT) {
             item { OutlinedTextField(name, { name = it.take(80) }, label = { Text("Repère de chambre — évitez le nom du résident") }, modifier = Modifier.fillMaxWidth()) }
             item { Text("Seuil relatif : ${threshold.toInt()}"); Slider(threshold, { threshold = it }, valueRange = 35f..85f); Text("Ce niveau n’est pas une mesure en dB SPL.", color = Quiet) }
@@ -463,7 +488,8 @@ private suspend fun delayForPin() = kotlinx.coroutines.delay(1500)
         }
         item { HorizontalDivider(color = Color(0xFF2D4059)) }
         item { Text("Protection des manipulations", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold) }
-        item { OutlinedButton(if (vm.prefs.isRoleLocked) disableLock else enableLock, Modifier.fillMaxWidth()) { Text(if (vm.prefs.isRoleLocked) "Désactiver la protection par code" else "Protéger les actions par un code") } }
+        item { OutlinedButton(if (codeProtectionEnabled) disableLock else enableLock, Modifier.fillMaxWidth()) { Text(if (codeProtectionEnabled) "Désactiver la protection par code" else "Protéger les actions par un code") } }
+        item { Text(if (codeProtectionEnabled) "Code activé pour les réglages et les actions sensibles." else "Code désactivé : les actions sont confirmées sans saisie de code. Le QR reste nécessaire pour autoriser un téléphone.", color = Quiet, style = MaterialTheme.typography.bodySmall) }
         item { Note("Après un redémarrage ou un arrêt forcé, ouvrez CareLink pour reprendre et contrôler la surveillance. Les événements non résolus sont conservés ; seuls les événements résolus expirent après 7 jours.") }
         item { OutlinedButton(stop, Modifier.fillMaxWidth().heightIn(min = 52.dp), colors = ButtonDefaults.outlinedButtonColors(contentColor = Rose)) { Text("Arrêter et changer de rôle") } }
         item { Text("En complément des procédures humaines. La disponibilité du Wi-Fi, le placement du téléphone et l’audibilité des alertes doivent être vérifiés sur site.", color = Quiet, style = MaterialTheme.typography.bodySmall) }

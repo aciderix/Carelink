@@ -1,0 +1,20 @@
+{
+  "version": "2.0.1-debug",
+  "versionCode": 3,
+  "applicationId": "com.aistudio.cradlelink.vxrtw.debug",
+  "apk": "CareLink-2.0.1-debug.apk",
+  "bytes": 19445469,
+  "sha256": "4acba7ec92a0500f817f3667a5da91716b658b8884bd5c1e9cc976a6a3a22331",
+  "jvm": {
+    "tests": 35,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "instrumented_tests": {
+    "compiled": 5,
+    "executed": 0,
+    "status": "environment_boot_incomplete",
+    "api_attempted": 35
+  }
+}

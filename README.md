@@ -4,9 +4,9 @@ Application Android de détection sonore et de communication sur réseau local, 
 
 ## Télécharger la version d’essai
 
-L’APK d’essai est inclus dans cette branche : **[CareLink 2.0.1-debug — télécharger](https://github.com/aciderix/Carelink/raw/refs/heads/carelink-v2-ameliorations-apk/downloads/CareLink-2.0.1-debug.apk)**. Depuis GitHub, ouvrir le fichier puis utiliser **Download raw file** si nécessaire. Le bouton **Code → Download ZIP** récupère aussi les sources et l’APK.
+L’APK d’essai est inclus dans cette branche : **[CareLink 2.0.2-debug — télécharger](https://github.com/aciderix/Carelink/raw/refs/heads/carelink-v2-ameliorations-apk/downloads/CareLink-2.0.2-debug.apk)**. Depuis GitHub, ouvrir le fichier puis utiliser **Download raw file** si nécessaire. Le bouton **Code → Download ZIP** récupère aussi les sources et l’APK.
 
-- [Dossier de téléchargement](downloads/) et [empreinte SHA-256](downloads/CareLink-2.0.1-debug.apk.sha256).
+- [Dossier de téléchargement](downloads/) et [empreinte SHA-256](downloads/CareLink-2.0.2-debug.apk.sha256).
 - [Résultats de validation](docs/RESULTATS_VALIDATION.md) et [consignes de qualification](docs/VALIDATION.md).
 - [Aperçu de l’accueil](docs/screenshots/welcome.png) et [tableau de surveillance](docs/screenshots/monitor-empty.png).
 
@@ -20,8 +20,12 @@ Il s’agit d’une version d’essai distincte de l’application de production
 - Chambre attendue conservée après redémarrage du veilleur. Capture récente, état réseau et incidents affichés séparément.
 - Services au premier plan indépendants des activités ; aucun type `dataSync` pour la permanence. Retour Android ne désarme plus la surveillance.
 - Contrôles de fraîcheur, capture rendue silencieuse, silence numérique prolongé, erreurs et saturation. Le test de transmission ne prétend pas vérifier le microphone.
-- Interface sombre, navigation Surveillance / Événements / Réglages, protection des actions sensibles par code et notifications sans acquittement accidentel depuis l’écran verrouillé.
+- Interface sombre, navigation Surveillance / Événements / Réglages, protection optionnelle des actions sensibles par code et notifications sans acquittement accidentel depuis l’écran verrouillé.
 - Pas de SDK Firebase, pas de service cloud applicatif et pas d’enregistrement audio conservé.
+
+## Interface et code dans la version 2.0.2
+
+Le titre affiche l’icône de l’application installée. Le réglage de protection par code s’applique désormais aussi à l’ajout d’une chambre, à l’appairage, aux tests, aux révocations et aux réglages distants. Sa désactivation ne supprime pas le code enregistré et son état est immédiatement visible dans les réglages. La réactivation demande de créer ou de saisir le code ; les autres actions ne le demandent que lorsque la protection est active.
 
 ## Connexion et découverte dans la version 2.0.1
 
@@ -35,10 +39,10 @@ Si deux téléphones ne se voient pas sur le Wi-Fi de l’établissement, consul
 
 1. Installer **la même version 2** sur les deux téléphones, connectés au réseau local autorisé.
 2. Sur la chambre, choisir le rôle et autoriser le microphone. Définir un repère de chambre non nominatif, le niveau relatif et la durée de dépassement.
-3. Toucher **Appairer un veilleur** et créer ou saisir le code professionnel. Sur le veilleur, toucher **Ajouter une chambre → Scanner le QR**. Le scan est entièrement local. Le code peut aussi être collé via un canal de confiance ; il est confidentiel.
+3. Toucher **Appairer un veilleur**. Si la protection par code est activée, créer ou saisir le code professionnel. Sur le veilleur, toucher **Ajouter une chambre → Scanner le QR**. Le scan est entièrement local. Le code peut aussi être collé via un canal de confiance ; il est confidentiel.
 4. Attendre la connexion authentifiée et des échantillons récents. Vérifier les notifications, le volume et l’audibilité sur le poste veilleur.
 5. Effectuer un test de transmission puis un véritable essai acoustique. Un test de transmission ne mesure ni la capture ni le besoin d’aide.
-6. Protéger les réglages par un code professionnel d’au moins six chiffres et verrouiller le téléphone Android. Conserver ce code selon la procédure du service.
+6. La protection par code professionnel est optionnelle dans **Réglages**. Activée, elle demande un code d’au moins six chiffres pour les réglages et les actions sensibles ; désactivée, ces actions ne demandent plus ce code. Le QR d’appairage reste nécessaire pour autoriser un nouveau téléphone. Le verrouillage Android se règle séparément.
 
 Les autres téléphones du LAN ne sont pas ajoutés automatiquement. La révocation ferme leurs connexions ; un nouvel appairage physique est nécessaire pour rétablir un accès révoqué. Le code expire aussi lorsque l’application chambre passe en arrière-plan pendant l’appairage.
 

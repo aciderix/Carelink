@@ -19,6 +19,8 @@ import kotlinx.coroutines.flow.*
 class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val context = application
     val prefs = PreferencesManager(context)
+    private val _codeProtectionEnabled = MutableStateFlow(prefs.isRoleLocked)
+    val codeProtectionEnabled = _codeProtectionEnabled.asStateFlow()
     private val pairing = PairingStore(context)
     val room = RoomMonitoringService.serviceState
     val monitor = MonitorMonitoringService.serviceState
@@ -29,6 +31,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val pairingSeconds = MutableStateFlow(0)
     private var enrollmentJob: Job? = null
     private var resumed = false
+    fun setCodeProtection(enabled: Boolean) {
+        prefs.isRoleLocked = enabled
+        _codeProtectionEnabled.value = enabled
+    }
     fun ready() {
         if (resumed) return
         resumed = true
