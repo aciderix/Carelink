@@ -12,8 +12,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 
 private val DarkColorScheme = darkColorScheme(
-    primary = SkyBluePrimary,
-    onPrimary = Color(0xFF003549),
+    primary = Color(0xFF65E0C0),
+    onPrimary = Color(0xFF10202B),
     primaryContainer = Color(0xFF004D69),
     onPrimaryContainer = Color(0xFFC2E8FF),
     secondary = SoftIndigo,
@@ -21,12 +21,12 @@ private val DarkColorScheme = darkColorScheme(
     secondaryContainer = Color(0xFF333380),
     onSecondaryContainer = Color(0xFFDFE0FF),
     tertiary = WarningAmber,
-    background = DeepNavy,
+    background = Color(0xFF0B1220),
     onBackground = TextPrimary,
-    surface = MidnightBlue,
+    surface = Color(0xFF101C2E),
     onSurface = TextPrimary,
     surfaceVariant = SurfaceDark,
-    onSurfaceVariant = TextSecondary,
+    onSurfaceVariant = Color(0xFFA9B9C9),
     outline = SurfaceBorder,
     error = CryAlertRed,
     errorContainer = CryAlertContainer,

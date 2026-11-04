@@ -4,6 +4,8 @@ import android.util.Log
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import org.json.JSONObject
@@ -12,13 +14,13 @@ import java.net.DatagramSocket
 import java.net.InetSocketAddress
 import java.util.concurrent.CopyOnWriteArrayList
 
-class LanDiscoveryManager {
+class LanDiscoveryManager(private val context: android.content.Context) {
 
     companion object {
         const val DISCOVERY_PORT = 9876
     }
 
-    private val scope = CoroutineScope(Dispatchers.IO)
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var broadcastJob: Job? = null
     private var listenJob: Job? = null
     private var socket: DatagramSocket? = null
@@ -65,7 +67,7 @@ class LanDiscoveryManager {
                     }.toString()
 
                     val bytes = beaconJson.toByteArray(Charsets.UTF_8)
-                    val targetAddress = NetworkUtils.getBroadcastAddress()
+                    val targetAddress = NetworkUtils.getBroadcastAddress(context)
                     val packet = DatagramPacket(bytes, bytes.size, targetAddress, DISCOVERY_PORT)
 
                     try {
@@ -103,6 +105,7 @@ class LanDiscoveryManager {
 
                 while (isActive) {
                     try {
+                        packet.length = buffer.size
                         recvSocket.receive(packet)
                         val message = String(packet.data, 0, packet.length, Charsets.UTF_8)
                         val senderIp = packet.address.hostAddress ?: ""
@@ -132,6 +135,8 @@ class LanDiscoveryManager {
             }
         }
     }
+
+    fun release() { stop(); scope.cancel() }
 
     fun stop() {
         broadcastJob?.cancel()

@@ -1,227 +1,86 @@
 package com.example.ui
 
+import android.Manifest
 import android.app.Application
-import android.content.Context
+import android.content.pm.PackageManager
+import android.os.SystemClock
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import com.example.data.PreferencesManager
-import com.example.model.DeviceRole
-import com.example.model.RoomAlertEvent
-import com.example.model.RoomStatus
-import com.example.model.RoomUnitState
+import com.example.data.*
+import com.example.model.*
 import com.example.network.NetworkUtils
-import com.example.service.MonitorMonitoringService
-import com.example.service.RoomMonitoringService
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.update
-import kotlinx.coroutines.launch
-
-data class MainUiState(
-    val currentRole: DeviceRole = DeviceRole.NONE,
-    val localIpAddress: String = "127.0.0.1",
-    val isWifiConnected: Boolean = true,
-
-    // Room Unit Mode (Transmitter)
-    val isRoomServiceRunning: Boolean = false,
-    val roomUnitName: String = "Chambre 1",
-    val roomUnitId: String = "",
-    val roomCurrentDb: Int = 0,
-    val roomThresholdDb: Int = 55,
-    val roomStatus: RoomStatus = RoomStatus.CALM,
-    val isCaregiverTalkingToRoom: Boolean = false,
-    val isMicOperational: Boolean = true,
-    val micErrorMessage: String? = null,
-
-    // Monitor Unit Mode (Caregiver Multi-Room Dashboard)
-    val isMonitorServiceRunning: Boolean = false,
-    val monitoredRooms: List<RoomUnitState> = emptyList(),
-    val activeAlerts: List<RoomAlertEvent> = emptyList(),
-    val activeListeningRoomId: String? = null,
-    val isTransmittingVoice: Boolean = false,
-    val talkBackRoom: RoomUnitState? = null,
-    val selectedDetailRoom: RoomUnitState? = null,
-
-    // Dialogs
-    val isSettingsOpen: Boolean = false
-)
+import com.example.security.*
+import com.example.service.*
+import kotlinx.coroutines.*
+import kotlinx.coroutines.flow.*
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
-
-    private val context: Context get() = getApplication()
-    private val prefs = PreferencesManager(context)
-
-    private val _uiState = MutableStateFlow(
-        MainUiState(
-            currentRole = prefs.role,
-            roomUnitName = prefs.roomName,
-            roomUnitId = prefs.installationId,
-            roomThresholdDb = prefs.defaultSensitivityDb
-        )
-    )
-    val uiState: StateFlow<MainUiState> = _uiState.asStateFlow()
-
-    init {
-        updateNetworkInfo()
-
-        // Observe Room Monitoring Service state
-        viewModelScope.launch {
-            RoomMonitoringService.serviceState.collect { roomState ->
-                _uiState.update { current ->
-                    current.copy(
-                        isRoomServiceRunning = roomState.isRunning,
-                        roomUnitName = roomState.roomName.ifEmpty { prefs.roomName },
-                        roomUnitId = roomState.roomId.ifEmpty { prefs.installationId },
-                        roomCurrentDb = roomState.currentDecibels,
-                        roomThresholdDb = roomState.thresholdDb,
-                        roomStatus = roomState.status,
-                        isCaregiverTalkingToRoom = roomState.isCaregiverTalking,
-                        isMicOperational = roomState.isMicOperational,
-                        micErrorMessage = roomState.errorMessage
-                    )
-                }
+    private val context = application
+    val prefs = PreferencesManager(context)
+    private val pairing = PairingStore(context)
+    val room = RoomMonitoringService.serviceState
+    val monitor = MonitorMonitoringService.serviceState
+    val role = MutableStateFlow(prefs.role)
+    val message = MutableStateFlow<String?>(null)
+    val pairingCode = MutableStateFlow<String?>(null)
+    val peers = MutableStateFlow<List<String>>(emptyList())
+    val pairingSeconds = MutableStateFlow(0)
+    private var enrollmentJob: Job? = null
+    private var resumed = false
+    fun ready() {
+        if (resumed) return
+        resumed = true
+        if (role.value == DeviceRole.ROOM_UNIT && ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            message.value = "Microphone non autorisé : la surveillance n’a pas repris. Autorisez-le puis touchez Reprendre."
+        } else if (role.value != DeviceRole.NONE) start(role.value)
+    }
+    fun start(next: DeviceRole) {
+        try {
+            if (next == DeviceRole.ROOM_UNIT && ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+                message.value = "Autorisation microphone nécessaire"; return
             }
-        }
-
-        // Observe Monitor Monitoring Service state
-        viewModelScope.launch {
-            MonitorMonitoringService.serviceState.collect { monitorState ->
-                _uiState.update { current ->
-                    val updatedSelected = if (current.selectedDetailRoom != null) {
-                        monitorState.monitoredRooms.find { it.id == current.selectedDetailRoom.id }
-                            ?: current.selectedDetailRoom
-                    } else null
-
-                    current.copy(
-                        isMonitorServiceRunning = monitorState.isRunning,
-                        monitoredRooms = monitorState.monitoredRooms,
-                        activeAlerts = monitorState.activeAlerts,
-                        activeListeningRoomId = monitorState.activeListeningRoomId,
-                        isTransmittingVoice = monitorState.isTransmittingVoice,
-                        selectedDetailRoom = updatedSelected
-                    )
-                }
+            if (next != role.value) {
+                RoomMonitoringService.stopService(context); MonitorMonitoringService.stopService(context)
             }
-        }
-
-        // Start corresponding service if role was persisted
-        when (prefs.role) {
-            DeviceRole.ROOM_UNIT -> {
-                RoomMonitoringService.startService(
-                    context,
-                    roomName = prefs.roomName,
-                    thresholdDb = prefs.defaultSensitivityDb
-                )
+            prefs.role = next; role.value = next
+            when (next) {
+                DeviceRole.ROOM_UNIT -> RoomMonitoringService.startService(context)
+                DeviceRole.MONITOR_UNIT -> MonitorMonitoringService.startService(context)
+                DeviceRole.NONE -> { RoomMonitoringService.stopService(context); MonitorMonitoringService.stopService(context) }
             }
-            DeviceRole.MONITOR_UNIT -> {
-                MonitorMonitoringService.startService(context)
-            }
-            DeviceRole.NONE -> {
-                // No service started
-            }
+        } catch (_: Exception) { message.value = "Android refuse le démarrage. Gardez l’application visible et vérifiez les autorisations." }
+    }
+    fun stop() { cancelPairing(); prefs.role = DeviceRole.NONE; role.value = DeviceRole.NONE; RoomMonitoringService.stopService(context); MonitorMonitoringService.stopService(context) }
+    fun roomSettings(name: String, threshold: Int, duration: Int) {
+        prefs.roomName = name.trim().take(80).ifBlank { "Chambre" }; prefs.defaultSensitivityDb = threshold; prefs.minNoiseDurationMs = duration
+    }
+    fun remoteThreshold(id: String, value: Int) = MonitorMonitoringService.sendRemoteThreshold(context, id, value)
+    fun eventAction(event: RoomAlertEvent, resolve: Boolean) = MonitorMonitoringService.eventAction(context, event.eventId, resolve)
+    fun listen(id: String) = MonitorMonitoringService.toggleListenAudio(context, id)
+    fun speak(id: String) = MonitorMonitoringService.startTalkBack(context, id)
+    fun stopSpeaking() = MonitorMonitoringService.stopTalkBack(context)
+    fun test() { if (room.value.isRunning) RoomMonitoringService.triggerManualSpike(context) }
+    fun newPairing() {
+        val previous = enrollmentJob
+        previous?.cancel()
+        enrollmentJob = viewModelScope.launch(Dispatchers.IO) {
+            previous?.join()
+            try {
+                pairingCode.value = pairing.createCode(SecureTransport(context).certificate(), NetworkUtils.getLocalIpAddress(context))
+                for (left in 120 downTo 1) { pairingSeconds.value = left; delay(1000); if (!pairing.enrollmentOpen()) { message.value = "Veilleur appairé. Vérifiez la réception et les autorisations."; break } }
+            } catch (_: Exception) { message.value = "Impossible de créer l’appairage sécurisé sur cet appareil" }
+            finally { pairingCode.value = null; pairingSeconds.value = 0; pairing.cancelEnrollment(); reloadPeers() }
         }
     }
-
-    fun updateNetworkInfo() {
-        val ip = NetworkUtils.getLocalIpAddress()
-        val isWifi = NetworkUtils.isWifiConnected(context)
-        _uiState.update { it.copy(localIpAddress = ip, isWifiConnected = isWifi) }
+    fun cancelPairing() { enrollmentJob?.cancel(); pairingCode.value = null; pairing.cancelEnrollment() }
+    fun importPairing(code: String) = viewModelScope.launch(Dispatchers.IO) {
+        try {
+            pairing.importCode(code.trim()); MonitorMonitoringService.refresh(context)
+            message.value = "Chambre ajoutée. Attendez sa vérification avant de commencer la surveillance."
+        } catch (_: Exception) { message.value = "Code invalide. Vérifiez le QR et sa durée de validité." }
     }
-
-    fun selectRole(role: DeviceRole) {
-        prefs.role = role
-        _uiState.update { it.copy(currentRole = role, selectedDetailRoom = null, talkBackRoom = null) }
-
-        when (role) {
-            DeviceRole.ROOM_UNIT -> {
-                MonitorMonitoringService.stopService(context)
-                RoomMonitoringService.startService(
-                    context,
-                    roomName = prefs.roomName,
-                    thresholdDb = prefs.defaultSensitivityDb
-                )
-            }
-            DeviceRole.MONITOR_UNIT -> {
-                RoomMonitoringService.stopService(context)
-                MonitorMonitoringService.startService(context)
-            }
-            DeviceRole.NONE -> {
-                RoomMonitoringService.stopService(context)
-                MonitorMonitoringService.stopService(context)
-            }
-        }
-    }
-
-    // ==============================================================
-    // ROOM UNIT ACTIONS
-    // ==============================================================
-    fun setRoomUnitName(name: String) {
-        prefs.roomName = name
-        _uiState.update { it.copy(roomUnitName = name) }
-        RoomMonitoringService.updateSettings(context, roomName = name)
-    }
-
-    fun setRoomThreshold(db: Int) {
-        prefs.defaultSensitivityDb = db
-        _uiState.update { it.copy(roomThresholdDb = db) }
-        RoomMonitoringService.updateSettings(context, thresholdDb = db)
-    }
-
-    fun triggerRoomManualNoiseSpike() {
-        RoomMonitoringService.triggerManualSpike(context)
-    }
-
-    // ==============================================================
-    // MONITOR UNIT ACTIONS
-    // ==============================================================
-    fun toggleAudioListening(unit: RoomUnitState) {
-        MonitorMonitoringService.toggleListenAudio(context, unit.id, unit.ipAddress)
-    }
-
-    fun openTalkBack(unit: RoomUnitState) {
-        _uiState.update { it.copy(talkBackRoom = unit) }
-    }
-
-    fun closeTalkBack() {
-        MonitorMonitoringService.stopTalkBack(context)
-        _uiState.update { it.copy(talkBackRoom = null) }
-    }
-
-    fun startSpeakingToRoom(unit: RoomUnitState) {
-        MonitorMonitoringService.startTalkBack(context, unit.id, unit.ipAddress)
-    }
-
-    fun stopSpeakingToRoom(unit: RoomUnitState) {
-        MonitorMonitoringService.stopTalkBack(context)
-    }
-
-    fun remoteUpdateThreshold(unit: RoomUnitState, thresholdDb: Int) {
-        MonitorMonitoringService.sendRemoteThreshold(context, unit.id, thresholdDb)
-    }
-
-    fun acknowledgeAlert(roomId: String) {
-        MonitorMonitoringService.acknowledgeAlert(context, roomId)
-    }
-
-    fun acknowledgeAllAlerts() {
-        MonitorMonitoringService.acknowledgeAll(context)
-    }
-
-    fun selectDetailRoom(unit: RoomUnitState?) {
-        _uiState.update { it.copy(selectedDetailRoom = unit) }
-    }
-
-    fun openSettings() {
-        _uiState.update { it.copy(isSettingsOpen = true) }
-    }
-
-    fun closeSettings() {
-        _uiState.update { it.copy(isSettingsOpen = false) }
-    }
-
-    override fun onCleared() {
-        super.onCleared()
-        // Note: Services intentionally keep running in foreground when UI is closed or destroyed.
-    }
+    fun reloadPeers() = viewModelScope.launch(Dispatchers.IO) { runCatching { peers.value = pairing.monitors() } }
+    fun revoke(id: String) = viewModelScope.launch(Dispatchers.IO) { pairing.revoke(id); reloadPeers() }
+    fun forget(id: String) = MonitorMonitoringService.forget(context, id)
 }

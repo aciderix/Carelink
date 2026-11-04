@@ -1,198 +1,60 @@
 package com.example.service
 
 import android.content.Context
-import android.media.AudioAttributes
-import android.media.Ringtone
-import android.media.RingtoneManager
-import android.os.Build
-import android.os.VibrationEffect
-import android.os.Vibrator
-import android.os.VibratorManager
+import com.example.data.EventStore
 import com.example.data.PreferencesManager
-import com.example.model.AlertEventType
-import com.example.model.RoomAlertEvent
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
+import com.example.model.*
+import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.isActive
-import kotlinx.coroutines.launch
-import java.util.concurrent.ConcurrentHashMap
 
-class AlertManager(private val context: Context) {
-
-    private val scope = CoroutineScope(Dispatchers.Main)
+class AlertManager(private val context: Context, private val store: EventStore = EventStore(context)) {
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val prefs = PreferencesManager(context)
-
-    // Map of active, unacknowledged alerts keyed by roomId
-    private val activeAlerts = ConcurrentHashMap<String, RoomAlertEvent>()
-
-    private val _activeAlertsFlow = MutableStateFlow<List<RoomAlertEvent>>(emptyList())
-    val activeAlertsFlow: StateFlow<List<RoomAlertEvent>> = _activeAlertsFlow.asStateFlow()
-
-    private var repeatJob: Job? = null
-    private var residentRingtone: Ringtone? = null
-    private var techRingtone: Ringtone? = null
-    private var vibrator: Vibrator? = null
-
+    private val _events = MutableStateFlow(store.all("monitor"))
+    val history = _events.asStateFlow()
+    private val _active = MutableStateFlow(_events.value.filterNot { it.resolved })
+    val activeAlertsFlow = _active.asStateFlow()
     init {
-        initMedia()
+        CareLinkNotificationHelper.createNotificationChannels(context)
+        _active.value.forEach { CareLinkNotificationHelper.post(context, it) }
+        scope.launch {
+            var since = android.os.SystemClock.elapsedRealtime()
+            while (isActive) {
+                delay(1000)
+                val now = android.os.SystemClock.elapsedRealtime()
+                if (!prefs.isAlertRepeatEnabled) { since = now; continue }
+                if (now - since >= prefs.alertRepeatIntervalSeconds.coerceIn(10, 120) * 1000L) {
+                    _active.value.filterNot { it.isAcknowledged }.forEach { CareLinkNotificationHelper.post(context, it, true) }
+                    since = now
+                }
+            }
+        }
     }
-
-    private fun initMedia() {
-        try {
-            vibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                val vm = context.getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as? VibratorManager
-                vm?.defaultVibrator
-            } else {
-                @Suppress("DEPRECATION")
-                context.getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
-            }
-
-            val residentUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
-                ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
-            residentRingtone = RingtoneManager.getRingtone(context, residentUri)?.apply {
-                audioAttributes = AudioAttributes.Builder()
-                    .setUsage(AudioAttributes.USAGE_ALARM)
-                    .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
-                    .build()
-            }
-
-            val techUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
-            techRingtone = RingtoneManager.getRingtone(context, techUri)?.apply {
-                audioAttributes = AudioAttributes.Builder()
-                    .setUsage(AudioAttributes.USAGE_NOTIFICATION)
-                    .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
-                    .build()
-            }
-        } catch (_: Exception) {}
+    @Synchronized fun triggerAlert(event: RoomAlertEvent) {
+        val old = store.get("monitor", event.eventId)
+        val fresh = store.put("monitor", event) // Receipt is permitted only after this returns.
+        store.confirm(event)
+        publish()
+        if (fresh || old?.isAcknowledged != event.isAcknowledged || old?.resolved != event.resolved)
+            CareLinkNotificationHelper.post(context, store.get("monitor", event.eventId)!!)
     }
-
-    fun triggerAlert(event: RoomAlertEvent) {
-        val existing = activeAlerts[event.roomId]
-        // If an alert is already unacknowledged for this room, update its decibels/duration but do not replace
-        val mergedEvent = if (existing != null && !existing.isAcknowledged) {
-            existing.copy(
-                levelReachedDb = maxOf(existing.levelReachedDb, event.levelReachedDb),
-                timestamp = event.timestamp,
-                durationSeconds = existing.durationSeconds + 1
-            )
+    @Synchronized fun incident(room: RoomUnitState, kind: AlertEventType, message: String) {
+        if (_active.value.any { it.roomId == room.id && it.eventType == kind }) return
+        triggerAlert(RoomAlertEvent(roomId = room.id, roomName = room.name, eventType = kind, notes = message))
+    }
+    @Synchronized fun transition(eventId: String, resolve: Boolean) {
+        val event = store.get("monitor", eventId) ?: return
+        if (event.remote) {
+            store.request(event.eventId, event.roomId, if (resolve) "RESOLVE" else "ACK")
         } else {
-            event
-        }
-
-        activeAlerts[event.roomId] = mergedEvent
-        updateFlow()
-
-        // Post Android Notification
-        CareLinkNotificationHelper.postRoomAlertNotification(context, mergedEvent)
-
-        // Play feedback
-        playFeedback(mergedEvent.eventType)
-
-        // Start repeat scheduler if not already running
-        startRepeatScheduler()
-    }
-
-    fun acknowledgeAlert(roomId: String) {
-        activeAlerts.remove(roomId)
-        updateFlow()
-        CareLinkNotificationHelper.cancelRoomAlertNotification(context, roomId)
-
-        if (activeAlerts.isEmpty()) {
-            stopRepeatScheduler()
-            stopAudio()
+            val changed = store.transition("monitor", eventId, prefs.deviceLabel, resolve) ?: return
+            CareLinkNotificationHelper.post(context, changed); publish()
         }
     }
-
-    fun acknowledgeAll() {
-        for (roomId in activeAlerts.keys) {
-            CareLinkNotificationHelper.cancelRoomAlertNotification(context, roomId)
-        }
-        activeAlerts.clear()
-        updateFlow()
-        stopRepeatScheduler()
-        stopAudio()
+    fun publish() {
+        _events.value = store.all("monitor")
+        _active.value = _events.value.filterNot { it.resolved }
     }
-
-    private fun updateFlow() {
-        _activeAlertsFlow.value = activeAlerts.values.toList()
-    }
-
-    private fun playFeedback(eventType: AlertEventType) {
-        if (prefs.isVibrationAlertEnabled) {
-            try {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                    val pattern = if (eventType == AlertEventType.SOUND_ALERT) {
-                        longArrayOf(0, 450, 150, 450, 150, 450)
-                    } else {
-                        longArrayOf(0, 250, 150, 250)
-                    }
-                    vibrator?.vibrate(VibrationEffect.createWaveform(pattern, -1))
-                } else {
-                    @Suppress("DEPRECATION")
-                    vibrator?.vibrate(longArrayOf(0, 400, 200, 400), -1)
-                }
-            } catch (_: Exception) {}
-        }
-
-        if (prefs.isSoundAlertEnabled) {
-            try {
-                if (eventType == AlertEventType.SOUND_ALERT) {
-                    if (residentRingtone?.isPlaying == false) {
-                        residentRingtone?.play()
-                    }
-                } else {
-                    if (techRingtone?.isPlaying == false) {
-                        techRingtone?.play()
-                    }
-                }
-            } catch (_: Exception) {}
-        }
-    }
-
-    private fun stopAudio() {
-        try {
-            residentRingtone?.stop()
-            techRingtone?.stop()
-            vibrator?.cancel()
-        } catch (_: Exception) {}
-    }
-
-    private fun startRepeatScheduler() {
-        if (repeatJob != null) return
-        if (!prefs.isAlertRepeatEnabled) return
-
-        repeatJob = scope.launch {
-            while (isActive && activeAlerts.isNotEmpty()) {
-                val intervalMs = (prefs.alertRepeatIntervalSeconds.coerceIn(10, 120)) * 1000L
-                delay(intervalMs)
-                if (activeAlerts.isNotEmpty()) {
-                    val highestPriority = if (activeAlerts.values.any { it.eventType == AlertEventType.SOUND_ALERT }) {
-                        AlertEventType.SOUND_ALERT
-                    } else {
-                        AlertEventType.DISCONNECTION
-                    }
-                    playFeedback(highestPriority)
-                }
-            }
-        }
-    }
-
-    private fun stopRepeatScheduler() {
-        repeatJob?.cancel()
-        repeatJob = null
-    }
-
-    fun testAlertFeedback() {
-        playFeedback(AlertEventType.SOUND_ALERT)
-    }
-
-    fun release() {
-        stopRepeatScheduler()
-        stopAudio()
-    }
+    fun release() { scope.cancel() }
 }

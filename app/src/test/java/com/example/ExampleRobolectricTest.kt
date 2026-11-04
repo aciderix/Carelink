@@ -91,13 +91,15 @@ class ExampleRobolectricTest {
         assertEquals("Both alerts must be active simultaneously", 2, activeList.size)
 
         // Acknowledge Room 1 only
-        alertManager.acknowledgeAlert("room_1")
+        alertManager.transition("evt_1", false)
         activeList = alertManager.activeAlertsFlow.value
-        assertEquals("Only Room 2 should remain active", 1, activeList.size)
-        assertEquals("room_2", activeList[0].roomId)
+        assertEquals("Acknowledgement preserves both visible events until resolution", 2, activeList.size)
+        assertTrue(activeList.single { it.roomId == "room_1" }.isAcknowledged)
+        assertFalse(activeList.single { it.roomId == "room_2" }.isAcknowledged)
 
         // Acknowledge All
-        alertManager.acknowledgeAll()
+        alertManager.transition("evt_1", true)
+        alertManager.transition("evt_2", true)
         activeList = alertManager.activeAlertsFlow.value
         assertTrue("All alerts should be cleared", activeList.isEmpty())
 

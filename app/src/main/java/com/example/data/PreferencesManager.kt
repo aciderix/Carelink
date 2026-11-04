@@ -11,13 +11,13 @@ class PreferencesManager(context: Context) {
         context.getSharedPreferences("carelink_prefs", Context.MODE_PRIVATE)
 
     val installationId: String
-        get() {
+        get() = synchronized(identityLock) {
             var id = prefs.getString("device_installation_id", null)
             if (id.isNullOrBlank()) {
                 id = UUID.randomUUID().toString()
                 prefs.edit().putString("device_installation_id", id).apply()
             }
-            return id
+            id
         }
 
     var role: DeviceRole
@@ -43,11 +43,11 @@ class PreferencesManager(context: Context) {
 
     var defaultSensitivityDb: Int
         get() = prefs.getInt("sensitivity_db", 55)
-        set(value) = prefs.edit().putInt("sensitivity_db", value).apply()
+        set(value) = prefs.edit().putInt("sensitivity_db", value.coerceIn(35, 85)).apply()
 
     var minNoiseDurationMs: Int
         get() = prefs.getInt("min_noise_duration_ms", 300)
-        set(value) = prefs.edit().putInt("min_noise_duration_ms", value).apply()
+        set(value) = prefs.edit().putInt("min_noise_duration_ms", value.coerceIn(100, 5000)).apply()
 
     var isVibrationAlertEnabled: Boolean
         get() = prefs.getBoolean("vibrate_alert", true)
@@ -64,6 +64,14 @@ class PreferencesManager(context: Context) {
     var alertRepeatIntervalSeconds: Int
         get() = prefs.getInt("alert_repeat_interval_sec", 30)
         set(value) = prefs.edit().putInt("alert_repeat_interval_sec", value).apply()
+
+    var deviceLabel: String
+        get() = prefs.getString("device_label", "Poste veilleur") ?: "Poste veilleur"
+        set(value) = prefs.edit().putString("device_label", value.take(80)).apply()
+    var pinHash: String
+        get() = prefs.getString("admin_pin", "") ?: ""
+        set(value) = prefs.edit().putString("admin_pin", value).apply()
+    companion object { private val identityLock = Any() }
 
     fun getThresholdForRoom(roomId: String): Int {
         return prefs.getInt("threshold_$roomId", defaultSensitivityDb)

@@ -1,266 +1,135 @@
 package com.example.network
 
-import android.util.Log
+import android.content.Context
+import android.os.SystemClock
 import com.example.audio.AudioPlayerEngine
-import com.example.model.RoomAlertEvent
-import com.example.model.RoomStatus
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
+import com.example.data.EventStore
+import com.example.security.*
+import kotlinx.coroutines.*
 import kotlinx.coroutines.channels.Channel
-import kotlinx.coroutines.isActive
-import kotlinx.coroutines.launch
 import org.json.JSONObject
-import java.io.BufferedReader
-import java.io.InputStreamReader
-import java.io.PrintWriter
-import java.net.ServerSocket
-import java.net.Socket
-import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicInteger
+import javax.net.ssl.SSLServerSocket
+import javax.net.ssl.SSLSocket
 
-class RoomServer(
-    private val controlPort: Int = 9877,
-    private val audioPort: Int = 9878,
-    private val talkbackPort: Int = 9879
-) {
-
-    private val scope = CoroutineScope(Dispatchers.IO)
-    private var controlServerJob: Job? = null
-    private var audioServerJob: Job? = null
-    private var talkbackServerJob: Job? = null
-    private var audioDispatcherJob: Job? = null
-
-    private var controlServerSocket: ServerSocket? = null
-    private var audioServerSocket: ServerSocket? = null
-    private var talkbackServerSocket: ServerSocket? = null
-
-    private val activeControlClients = CopyOnWriteArrayList<PrintWriter>()
-    private val activeAudioClients = CopyOnWriteArrayList<Socket>()
-    private val audioPacketChannel = Channel<ByteArray>(capacity = 32)
-
-    private val talkBackPlayer = AudioPlayerEngine(sampleRate = 16000)
-
-    var onCommandReceived: ((JSONObject) -> Unit)? = null
+/** Each accepted connection owns its jobs/socket. No plaintext compatibility fallback. */
+class RoomServer(private val context: Context, private val store: EventStore) {
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val transport = SecureTransport(context)
+    private val pairing = PairingStore(context)
+    private val listeners = mutableListOf<SSLServerSocket>()
+    private val sessions = ConcurrentHashMap<String, SecureSession>()
+    private val audio = ConcurrentHashMap<String, Channel<ByteArray>>()
+    private val count = AtomicInteger()
+    private val talking = AtomicInteger()
+    val connectedMonitors get() = sessions.keys.count { it.startsWith("control:") }
+    var telemetry: () -> JSONObject = { JSONObject() }
+    var onCommand: ((String, JSONObject) -> Unit)? = null
     var onTalkBackStatusChanged: ((Boolean) -> Unit)? = null
-
-    @Volatile
-    var isRunning = false
-        private set
-
+    var onError: ((String) -> Unit)? = null
     fun start() {
-        if (isRunning) return
-        isRunning = true
-
-        startControlServer()
-        startAudioServer()
-        startTalkbackServer()
-        startAudioDispatcher()
-    }
-
-    private fun startControlServer() {
-        controlServerJob = scope.launch {
-            try {
-                controlServerSocket = ServerSocket(controlPort).apply {
-                    reuseAddress = true
-                }
-                while (isActive && isRunning) {
-                    val client = controlServerSocket?.accept() ?: break
-                    handleControlClient(client)
-                }
-            } catch (e: Exception) {
-                Log.d("RoomServer", "Control server stopped: ${e.message}")
-            }
-        }
-    }
-
-    private fun handleControlClient(socket: Socket) {
-        scope.launch {
-            try {
-                val reader = BufferedReader(InputStreamReader(socket.getInputStream()))
-                val writer = PrintWriter(socket.getOutputStream(), true)
-                activeControlClients.add(writer)
-
-                while (isActive && isRunning && !socket.isClosed) {
-                    val line = reader.readLine() ?: break
+        try {
+            for ((port, channel) in listOf(9877 to "control", 9878 to "audio", 9879 to "talk")) {
+                val server = transport.server(port); listeners.add(server)
+                scope.launch {
                     try {
-                        val json = JSONObject(line)
-                        if (json.optString("cmd") == "PING") {
-                            val pong = JSONObject().apply {
-                                put("type", "PONG")
-                                put("timestamp", System.currentTimeMillis())
-                            }
-                            writer.println(pong.toString())
-                        } else {
-                            onCommandReceived?.invoke(json)
+                        while (isActive) {
+                            val socket = server.accept() as SSLSocket
+                            if (count.incrementAndGet() > 32) { count.decrementAndGet(); socket.close(); continue }
+                            scope.launch { serve(socket, channel) }
                         }
-                    } catch (_: Exception) {}
+                    } catch (e: Exception) { if (isActive) onError?.invoke("Serveur $channel indisponible") }
                 }
-            } catch (_: Exception) {
-            } finally {
-                try { socket.close() } catch (_: Exception) {}
             }
-        }
-    }
-
-    private fun startAudioServer() {
-        audioServerJob = scope.launch {
-            try {
-                audioServerSocket = ServerSocket(audioPort).apply {
-                    reuseAddress = true
-                }
-                while (isActive && isRunning) {
-                    val client = audioServerSocket?.accept() ?: break
-                    activeAudioClients.add(client)
-                }
-            } catch (e: Exception) {
-                Log.d("RoomServer", "Audio server stopped: ${e.message}")
-            }
-        }
-    }
-
-    private fun startAudioDispatcher() {
-        // Sequential single-coroutine audio packet dispatcher without unbounded coroutine creation
-        audioDispatcherJob = scope.launch {
-            for (packet in audioPacketChannel) {
-                if (activeAudioClients.isEmpty()) continue
-                val deadClients = mutableListOf<Socket>()
-                for (client in activeAudioClients) {
-                    try {
-                        client.getOutputStream().write(packet)
-                    } catch (_: Exception) {
-                        deadClients.add(client)
+            scope.launch {
+                while (isActive) {
+                    delay(500)
+                    for ((_, session) in sessions) {
+                        session.checkWriteDeadline()
+                        if (!pairing.stillAuthorized(session.deviceId, session.credential)) session.close()
                     }
                 }
-                if (deadClients.isNotEmpty()) {
-                    activeAudioClients.removeAll(deadClients)
-                }
             }
+        } catch (e: Exception) { stop(); throw e }
+    }
+    private suspend fun serve(socket: SSLSocket, channel: String) {
+        var connection: SecureSession? = null
+        var key: String? = null
+        try {
+            connection = transport.accept(socket, channel)
+            key = "$channel:${connection.deviceId}"
+            sessions.put(key, connection)?.close()
+            when (channel) {
+                "control" -> control(connection)
+                "audio" -> stream(connection)
+                "talk" -> talk(connection)
+            }
+        } catch (_: Exception) {
+            // Authentication errors deliberately reveal neither credentials nor resident details.
+        } finally {
+            if (key != null && connection != null) sessions.remove(key, connection)
+            connection?.close(); runCatching { socket.close() }; count.decrementAndGet()
         }
     }
-
-    private fun startTalkbackServer() {
-        talkbackServerJob = scope.launch {
+    private suspend fun control(connection: SecureSession) = coroutineScope {
+        val sender = launch {
             try {
-                talkbackServerSocket = ServerSocket(talkbackPort).apply {
-                    reuseAddress = true
+                while (isActive) {
+                    connection.send(telemetry().put("type", "ROOM_TELEMETRY").put("version", 2))
+                    for (event in store.pending(connection.deviceId).take(32))
+                        connection.send(event.toJson().put("type", "EVENT"))
+                    delay(1000)
                 }
-                while (isActive && isRunning) {
-                    val client = talkbackServerSocket?.accept() ?: break
-                    handleTalkbackClient(client)
-                }
-            } catch (e: Exception) {
-                Log.d("RoomServer", "Talkback server stopped: ${e.message}")
-            }
+            } catch (_: Exception) { connection.close() }
         }
-    }
-
-    private fun handleTalkbackClient(socket: Socket) {
-        scope.launch {
-            try {
-                talkBackPlayer.start()
-                onTalkBackStatusChanged?.invoke(true)
-                val inputStream = socket.getInputStream()
-                val buffer = ByteArray(2048)
-                var bytesRead: Int
-
-                while (isActive && isRunning) {
-                    bytesRead = inputStream.read(buffer)
-                    if (bytesRead == -1) break
-                    val chunk = buffer.copyOf(bytesRead)
-                    talkBackPlayer.writeAudio(chunk)
-                }
-            } catch (_: Exception) {
-            } finally {
-                talkBackPlayer.stop()
-                onTalkBackStatusChanged?.invoke(false)
-                try { socket.close() } catch (_: Exception) {}
-            }
-        }
-    }
-
-    fun broadcastAudioPacket(pcmBytes: ByteArray) {
-        if (!isRunning || activeAudioClients.isEmpty()) return
-        audioPacketChannel.trySend(pcmBytes)
-    }
-
-    fun broadcastTelemetry(
-        unitId: String,
-        unitName: String,
-        decibels: Int,
-        status: RoomStatus,
-        batteryPercent: Int,
-        isCharging: Boolean,
-        wifiSignalDbm: Int,
-        isMicOperational: Boolean,
-        thresholdDb: Int
-    ) {
-        if (activeControlClients.isEmpty()) return
-        scope.launch {
-            val json = JSONObject().apply {
-                put("type", "ROOM_TELEMETRY")
-                put("id", unitId)
-                put("name", unitName)
-                put("decibels", decibels)
-                put("status", status.name)
-                put("battery", batteryPercent)
-                put("isCharging", isCharging)
-                put("wifiRssi", wifiSignalDbm)
-                put("isMicOperational", isMicOperational)
-                put("threshold", thresholdDb)
-                put("timestamp", System.currentTimeMillis())
-            }.toString()
-
-            val deadWriters = mutableListOf<PrintWriter>()
-            for (writer in activeControlClients) {
-                try {
-                    writer.println(json)
-                } catch (_: Exception) {
-                    deadWriters.add(writer)
+        try {
+            while (currentCoroutineContext().isActive) {
+                val command = connection.receiveJson()
+                when (command.getString("cmd")) {
+                    "PING" -> connection.send(JSONObject().put("type", "PONG"))
+                    "RECEIVED" -> store.received(command.getString("eventId"), connection.deviceId, command.getInt("revision").coerceIn(0, 1000000))
+                    "ACK", "RESOLVE" -> {
+                        val event = store.transition("room", command.getString("eventId"), connection.deviceId,
+                            command.getString("cmd") == "RESOLVE")
+                        if (event != null) connection.send(event.toJson().put("type", "EVENT"))
+                    }
+                    "SET_THRESHOLD" -> {
+                        val value = command.getInt("value"); require(value in 35..85)
+                        onCommand?.invoke(connection.deviceId, command)
+                        connection.send(JSONObject().put("type", "SETTINGS_APPLIED").put("threshold", value))
+                    }
+                    else -> throw IllegalArgumentException("Commande inconnue")
                 }
             }
-            activeControlClients.removeAll(deadWriters)
-        }
+        } finally { sender.cancel(); connection.close() }
     }
-
-    fun broadcastAlertEvent(event: RoomAlertEvent) {
-        if (activeControlClients.isEmpty()) return
-        scope.launch {
-            val json = JSONObject().apply {
-                put("type", "ROOM_ALERT_EVENT")
-                put("eventId", event.eventId)
-                put("roomId", event.roomId)
-                put("roomName", event.roomName)
-                put("timestamp", event.timestamp)
-                put("levelReachedDb", event.levelReachedDb)
-                put("thresholdDb", event.thresholdDb)
-                put("eventType", event.eventType.name)
-                put("durationSeconds", event.durationSeconds)
-                put("notes", event.notes)
-            }.toString()
-
-            val deadWriters = mutableListOf<PrintWriter>()
-            for (writer in activeControlClients) {
-                try {
-                    writer.println(json)
-                } catch (_: Exception) {
-                    deadWriters.add(writer)
-                }
+    private suspend fun stream(connection: SecureSession) {
+        val queue = Channel<ByteArray>(4, kotlinx.coroutines.channels.BufferOverflow.DROP_OLDEST)
+        audio.put(connection.deviceId, queue)?.close()
+        try {
+            while (currentCoroutineContext().isActive) {
+                val bytes = withTimeout(3000) { queue.receive() }
+                connection.send(bytes)
             }
-            activeControlClients.removeAll(deadWriters)
+        } finally { audio.remove(connection.deviceId, queue); queue.close() }
+    }
+    private fun talk(connection: SecureSession) {
+        if (!talking.compareAndSet(0, 1)) return
+        val player = AudioPlayerEngine(context, speaker = true)
+        val until = SystemClock.elapsedRealtime() + 30000
+        try {
+            player.start(); onTalkBackStatusChanged?.invoke(true)
+            while (SystemClock.elapsedRealtime() < until && !connection.socket.isClosed) player.writeAudio(connection.receive())
+        } finally {
+            player.close(); talking.set(0); onTalkBackStatusChanged?.invoke(false)
         }
     }
-
+    fun broadcastAudioPacket(bytes: ByteArray) { for (queue in audio.values) queue.trySend(bytes) }
+    fun revoke(id: String) { pairing.revoke(id); sessions.values.filter { it.deviceId == id }.forEach { it.close() } }
     fun stop() {
-        isRunning = false
-        controlServerJob?.cancel()
-        audioServerJob?.cancel()
-        talkbackServerJob?.cancel()
-        audioDispatcherJob?.cancel()
-        try { controlServerSocket?.close() } catch (_: Exception) {}
-        try { audioServerSocket?.close() } catch (_: Exception) {}
-        try { talkbackServerSocket?.close() } catch (_: Exception) {}
-        talkBackPlayer.stop()
-        activeControlClients.clear()
-        activeAudioClients.clear()
+        listeners.forEach { runCatching { it.close() } }; listeners.clear()
+        sessions.values.forEach { it.close() }; sessions.clear()
+        audio.values.forEach { it.close() }; audio.clear(); scope.cancel()
     }
 }
