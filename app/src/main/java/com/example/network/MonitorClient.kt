@@ -1,12 +1,21 @@
 package com.example.network
 
+import android.content.Context
+import android.net.ConnectivityManager
+import android.net.Network
+import android.net.NetworkCapabilities
+import android.net.NetworkRequest
 import android.util.Log
 import com.example.audio.AudioPlayerEngine
+import com.example.audio.TalkBackTransmitter
+import com.example.model.AlertEventType
+import com.example.model.RoomAlertEvent
 import com.example.model.RoomStatus
 import com.example.model.RoomUnitState
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import org.json.JSONObject
@@ -17,94 +26,240 @@ import java.net.InetSocketAddress
 import java.net.Socket
 import java.util.concurrent.ConcurrentHashMap
 
-class MonitorClient {
+class MonitorClient(private val context: Context) {
 
     private val scope = CoroutineScope(Dispatchers.IO)
 
-    private val controlConnections = ConcurrentHashMap<String, UnitConnection>()
-    private val audioPlayers = ConcurrentHashMap<String, AudioStreamSession>()
+    private val roomConnections = ConcurrentHashMap<String, RoomConnectionSession>()
+    private val audioSessions = ConcurrentHashMap<String, AudioStreamSession>()
+    val talkBackTransmitter = TalkBackTransmitter(context)
 
     var onRoomTelemetryReceived: ((RoomUnitState) -> Unit)? = null
+    var onRoomAlertReceived: ((RoomAlertEvent) -> Unit)? = null
+    var onRoomDisconnected: ((String) -> Unit)? = null
 
-    private class UnitConnection(
-        val unitId: String,
+    private var networkCallback: ConnectivityManager.NetworkCallback? = null
+
+    private class RoomConnectionSession(
+        val roomId: String,
+        var ipAddress: String,
+        val port: Int,
         var socket: Socket? = null,
         var writer: PrintWriter? = null,
-        var job: Job? = null
+        var connectionJob: Job? = null,
+        var heartbeatJob: Job? = null,
+        var lastSeenTimestamp: Long = 0L,
+        var retryDelayMs: Long = 1000L
     )
 
     private class AudioStreamSession(
-        val unitId: String,
+        val roomId: String,
         val player: AudioPlayerEngine,
         var socket: Socket? = null,
         var job: Job? = null
     )
 
-    fun connectToRoom(unitId: String, ipAddress: String, controlPort: Int = 9877) {
-        if (controlConnections.containsKey(unitId)) return
+    init {
+        registerNetworkMonitoring()
+    }
 
-        val conn = UnitConnection(unitId)
-        controlConnections[unitId] = conn
+    private fun registerNetworkMonitoring() {
+        val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager ?: return
+        val builder = NetworkRequest.Builder()
+            .addTransportType(NetworkCapabilities.TRANSPORT_WIFI)
+            .addTransportType(NetworkCapabilities.TRANSPORT_ETHERNET)
 
-        conn.job = scope.launch {
-            try {
-                val socket = Socket()
-                socket.connect(InetSocketAddress(ipAddress, controlPort), 4000)
-                conn.socket = socket
-                conn.writer = PrintWriter(socket.getOutputStream(), true)
-
-                val reader = BufferedReader(InputStreamReader(socket.getInputStream()))
-
-                while (isActive && !socket.isClosed) {
-                    val line = reader.readLine() ?: break
-                    try {
-                        val json = JSONObject(line)
-                        if (json.optString("type") == "ROOM_TELEMETRY") {
-                            val statusStr = json.optString("status", "CALM")
-                            val status = try {
-                                RoomStatus.valueOf(statusStr)
-                            } catch (_: Exception) {
-                                RoomStatus.CALM
-                            }
-
-                            val unitState = RoomUnitState(
-                                id = json.optString("id", unitId),
-                                name = json.optString("name", "Chambre"),
-                                ipAddress = ipAddress,
-                                port = controlPort,
-                                status = status,
-                                currentDecibels = json.optInt("decibels", 22),
-                                noiseThresholdDb = json.optInt("threshold", 55),
-                                batteryPercent = json.optInt("battery", 85),
-                                isCharging = json.optBoolean("isCharging", true),
-                                temperatureCelsius = json.optDouble("temp", 20.5).toFloat(),
-                                lastPingTimestamp = System.currentTimeMillis()
-                            )
-
-                            onRoomTelemetryReceived?.invoke(unitState)
-                        }
-                    } catch (_: Exception) {}
+        networkCallback = object : ConnectivityManager.NetworkCallback() {
+            override fun onAvailable(network: Network) {
+                // Network restored: trigger immediate reconnect for all registered rooms
+                for ((_, session) in roomConnections) {
+                    if (session.socket == null || session.socket?.isClosed == true) {
+                        reconnectSession(session, immediate = true)
+                    }
                 }
-            } catch (e: Exception) {
-                Log.d("MonitorClient", "Connection error to $unitId: ${e.message}")
-            } finally {
-                controlConnections.remove(unitId)
+            }
+
+            override fun onLost(network: Network) {
+                for ((roomId, session) in roomConnections) {
+                    cleanSessionSockets(session)
+                    onRoomDisconnected?.invoke(roomId)
+                }
+            }
+        }
+
+        try {
+            cm.registerNetworkCallback(builder.build(), networkCallback!!)
+        } catch (_: Exception) {}
+    }
+
+    fun connectToRoom(roomId: String, ipAddress: String, controlPort: Int = 9877) {
+        val existing = roomConnections[roomId]
+        if (existing != null) {
+            existing.ipAddress = ipAddress
+            if (existing.socket == null || existing.socket?.isClosed == true) {
+                reconnectSession(existing, immediate = true)
+            }
+            return
+        }
+
+        val session = RoomConnectionSession(roomId, ipAddress, controlPort)
+        roomConnections[roomId] = session
+        startSessionLoop(session)
+    }
+
+    private fun startSessionLoop(session: RoomConnectionSession) {
+        session.connectionJob?.cancel()
+        session.connectionJob = scope.launch {
+            while (isActive) {
+                var socket: Socket? = null
+                try {
+                    socket = Socket()
+                    socket.connect(InetSocketAddress(session.ipAddress, session.port), 3500)
+                    session.socket = socket
+                    session.writer = PrintWriter(socket.getOutputStream(), true)
+                    session.lastSeenTimestamp = System.currentTimeMillis()
+                    session.retryDelayMs = 1000L // Reset backoff on success
+
+                    startHeartbeat(session)
+
+                    val reader = BufferedReader(InputStreamReader(socket.getInputStream()))
+
+                    while (isActive && !socket.isClosed) {
+                        val line = reader.readLine() ?: break
+                        handleIncomingControlMessage(session.roomId, session.ipAddress, line)
+                    }
+                } catch (e: Exception) {
+                    Log.d("MonitorClient", "Room connection error ${session.roomId}: ${e.message}")
+                } finally {
+                    cleanSessionSockets(session)
+                    onRoomDisconnected?.invoke(session.roomId)
+                }
+
+                if (!isActive) break
+
+                // Exponential backoff reconnect: 1s, 2s, 4s, 8s, max 15s
+                delay(session.retryDelayMs)
+                session.retryDelayMs = (session.retryDelayMs * 2).coerceAtMost(15000L)
             }
         }
     }
 
-    fun startListeningToAudio(unitId: String, ipAddress: String, audioPort: Int = 9878) {
-        stopListeningToAudio(unitId)
+    private fun startHeartbeat(session: RoomConnectionSession) {
+        session.heartbeatJob?.cancel()
+        session.heartbeatJob = scope.launch {
+            while (isActive && session.socket?.isConnected == true && session.socket?.isClosed == false) {
+                delay(3000)
+                try {
+                    val ping = JSONObject().apply {
+                        put("cmd", "PING")
+                        put("timestamp", System.currentTimeMillis())
+                    }
+                    session.writer?.println(ping.toString())
+
+                    // Check heartbeat timeout (if no valid packet received for > 7.5 seconds)
+                    val now = System.currentTimeMillis()
+                    if (session.lastSeenTimestamp > 0 && (now - session.lastSeenTimestamp) > 7500) {
+                        Log.d("MonitorClient", "Heartbeat timeout for room ${session.roomId}")
+                        cleanSessionSockets(session)
+                        onRoomDisconnected?.invoke(session.roomId)
+                        break
+                    }
+                } catch (_: Exception) {
+                    break
+                }
+            }
+        }
+    }
+
+    private fun reconnectSession(session: RoomConnectionSession, immediate: Boolean) {
+        if (immediate) {
+            session.retryDelayMs = 500L
+        }
+        startSessionLoop(session)
+    }
+
+    private fun cleanSessionSockets(session: RoomConnectionSession) {
+        session.heartbeatJob?.cancel()
+        session.heartbeatJob = null
+        try { session.socket?.close() } catch (_: Exception) {}
+        session.socket = null
+        session.writer = null
+    }
+
+    private fun handleIncomingControlMessage(roomId: String, ipAddress: String, line: String) {
+        try {
+            val json = JSONObject(line)
+            val session = roomConnections[roomId]
+            session?.lastSeenTimestamp = System.currentTimeMillis()
+
+            val type = json.optString("type")
+            when (type) {
+                "PONG" -> {
+                    // Heartbeat acknowledged
+                }
+                "ROOM_TELEMETRY" -> {
+                    val statusStr = json.optString("status", "CALM")
+                    val status = try {
+                        RoomStatus.valueOf(statusStr)
+                    } catch (_: Exception) {
+                        RoomStatus.CALM
+                    }
+
+                    val unitState = RoomUnitState(
+                        id = json.optString("id", roomId),
+                        name = json.optString("name", "Chambre"),
+                        ipAddress = ipAddress,
+                        status = status,
+                        currentDecibels = json.optInt("decibels", 0),
+                        noiseThresholdDb = json.optInt("threshold", 55),
+                        batteryPercent = json.optInt("battery", -1),
+                        isCharging = json.optBoolean("isCharging", false),
+                        wifiSignalDbm = json.optInt("wifiRssi", 0),
+                        isMicOperational = json.optBoolean("isMicOperational", true),
+                        lastSeenTimestamp = System.currentTimeMillis(),
+                        isAudioStreaming = isListening(roomId)
+                    )
+
+                    onRoomTelemetryReceived?.invoke(unitState)
+                }
+                "ROOM_ALERT_EVENT" -> {
+                    val eventTypeStr = json.optString("eventType", "SOUND_ALERT")
+                    val eventType = try {
+                        AlertEventType.valueOf(eventTypeStr)
+                    } catch (_: Exception) {
+                        AlertEventType.SOUND_ALERT
+                    }
+
+                    val event = RoomAlertEvent(
+                        eventId = json.optString("eventId"),
+                        roomId = json.optString("roomId", roomId),
+                        roomName = json.optString("roomName", "Chambre"),
+                        timestamp = json.optLong("timestamp", System.currentTimeMillis()),
+                        levelReachedDb = json.optInt("levelReachedDb", 0),
+                        thresholdDb = json.optInt("thresholdDb", 55),
+                        eventType = eventType,
+                        durationSeconds = json.optInt("durationSeconds", 0),
+                        notes = json.optString("notes", "")
+                    )
+
+                    onRoomAlertReceived?.invoke(event)
+                }
+            }
+        } catch (_: Exception) {}
+    }
+
+    fun startListeningToAudio(roomId: String, ipAddress: String, audioPort: Int = 9878) {
+        stopListeningToAudio(roomId)
 
         val player = AudioPlayerEngine(sampleRate = 16000)
         player.start()
-        val session = AudioStreamSession(unitId, player)
-        audioPlayers[unitId] = session
+        val session = AudioStreamSession(roomId, player)
+        audioSessions[roomId] = session
 
         session.job = scope.launch {
             try {
                 val socket = Socket()
-                socket.connect(InetSocketAddress(ipAddress, audioPort), 4000)
+                socket.connect(InetSocketAddress(ipAddress, audioPort), 3500)
                 session.socket = socket
 
                 val inputStream = socket.getInputStream()
@@ -118,53 +273,64 @@ class MonitorClient {
                     player.writeAudio(chunk)
                 }
             } catch (e: Exception) {
-                Log.d("MonitorClient", "Audio stream error $unitId: ${e.message}")
+                Log.d("MonitorClient", "Audio stream error $roomId: ${e.message}")
             } finally {
                 player.stop()
-                audioPlayers.remove(unitId)
+                audioSessions.remove(roomId)
             }
         }
     }
 
-    fun stopListeningToAudio(unitId: String) {
-        audioPlayers[unitId]?.let { session ->
+    fun stopListeningToAudio(roomId: String) {
+        audioSessions[roomId]?.let { session ->
             session.job?.cancel()
             try { session.socket?.close() } catch (_: Exception) {}
             session.player.stop()
         }
-        audioPlayers.remove(unitId)
+        audioSessions.remove(roomId)
     }
 
-    fun isListening(unitId: String): Boolean {
-        return audioPlayers.containsKey(unitId)
+    fun isListening(roomId: String): Boolean {
+        return audioSessions.containsKey(roomId)
     }
 
-    fun sendCommand(unitId: String, commandJson: JSONObject) {
-        scope.launch {
-            controlConnections[unitId]?.writer?.println(commandJson.toString())
-        }
-    }
-
-    fun sendThresholdUpdate(unitId: String, thresholdDb: Int) {
+    fun sendThresholdUpdate(roomId: String, thresholdDb: Int) {
         val json = JSONObject().apply {
             put("cmd", "SET_THRESHOLD")
             put("value", thresholdDb)
         }
-        sendCommand(unitId, json)
+        scope.launch {
+            roomConnections[roomId]?.writer?.println(json.toString())
+        }
+    }
+
+    fun startSpeaking(roomId: String, targetIp: String, targetPort: Int = 9879) {
+        talkBackTransmitter.startTransmitting(targetIp, targetPort)
+    }
+
+    fun stopSpeaking() {
+        talkBackTransmitter.stopTransmitting()
     }
 
     fun disconnectAll() {
-        for ((_, session) in audioPlayers) {
+        val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+        networkCallback?.let { try { cm?.unregisterNetworkCallback(it) } catch (_: Exception) {} }
+        networkCallback = null
+
+        talkBackTransmitter.stopTransmitting()
+
+        for ((_, session) in audioSessions) {
             session.job?.cancel()
             try { session.socket?.close() } catch (_: Exception) {}
             session.player.stop()
         }
-        audioPlayers.clear()
+        audioSessions.clear()
 
-        for ((_, conn) in controlConnections) {
-            conn.job?.cancel()
+        for ((_, conn) in roomConnections) {
+            conn.connectionJob?.cancel()
+            conn.heartbeatJob?.cancel()
             try { conn.socket?.close() } catch (_: Exception) {}
         }
-        controlConnections.clear()
+        roomConnections.clear()
     }
 }

@@ -2,10 +2,12 @@ package com.example.network
 
 import android.util.Log
 import com.example.audio.AudioPlayerEngine
+import com.example.model.RoomAlertEvent
 import com.example.model.RoomStatus
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import org.json.JSONObject
@@ -26,6 +28,7 @@ class RoomServer(
     private var controlServerJob: Job? = null
     private var audioServerJob: Job? = null
     private var talkbackServerJob: Job? = null
+    private var audioDispatcherJob: Job? = null
 
     private var controlServerSocket: ServerSocket? = null
     private var audioServerSocket: ServerSocket? = null
@@ -33,6 +36,7 @@ class RoomServer(
 
     private val activeControlClients = CopyOnWriteArrayList<PrintWriter>()
     private val activeAudioClients = CopyOnWriteArrayList<Socket>()
+    private val audioPacketChannel = Channel<ByteArray>(capacity = 32)
 
     private val talkBackPlayer = AudioPlayerEngine(sampleRate = 16000)
 
@@ -50,6 +54,7 @@ class RoomServer(
         startControlServer()
         startAudioServer()
         startTalkbackServer()
+        startAudioDispatcher()
     }
 
     private fun startControlServer() {
@@ -79,7 +84,15 @@ class RoomServer(
                     val line = reader.readLine() ?: break
                     try {
                         val json = JSONObject(line)
-                        onCommandReceived?.invoke(json)
+                        if (json.optString("cmd") == "PING") {
+                            val pong = JSONObject().apply {
+                                put("type", "PONG")
+                                put("timestamp", System.currentTimeMillis())
+                            }
+                            writer.println(pong.toString())
+                        } else {
+                            onCommandReceived?.invoke(json)
+                        }
                     } catch (_: Exception) {}
                 }
             } catch (_: Exception) {
@@ -101,6 +114,26 @@ class RoomServer(
                 }
             } catch (e: Exception) {
                 Log.d("RoomServer", "Audio server stopped: ${e.message}")
+            }
+        }
+    }
+
+    private fun startAudioDispatcher() {
+        // Sequential single-coroutine audio packet dispatcher without unbounded coroutine creation
+        audioDispatcherJob = scope.launch {
+            for (packet in audioPacketChannel) {
+                if (activeAudioClients.isEmpty()) continue
+                val deadClients = mutableListOf<Socket>()
+                for (client in activeAudioClients) {
+                    try {
+                        client.getOutputStream().write(packet)
+                    } catch (_: Exception) {
+                        deadClients.add(client)
+                    }
+                }
+                if (deadClients.isNotEmpty()) {
+                    activeAudioClients.removeAll(deadClients)
+                }
             }
         }
     }
@@ -146,18 +179,8 @@ class RoomServer(
     }
 
     fun broadcastAudioPacket(pcmBytes: ByteArray) {
-        if (activeAudioClients.isEmpty()) return
-        scope.launch {
-            val toRemove = mutableListOf<Socket>()
-            for (client in activeAudioClients) {
-                try {
-                    client.getOutputStream().write(pcmBytes)
-                } catch (_: Exception) {
-                    toRemove.add(client)
-                }
-            }
-            activeAudioClients.removeAll(toRemove)
-        }
+        if (!isRunning || activeAudioClients.isEmpty()) return
+        audioPacketChannel.trySend(pcmBytes)
     }
 
     fun broadcastTelemetry(
@@ -167,7 +190,8 @@ class RoomServer(
         status: RoomStatus,
         batteryPercent: Int,
         isCharging: Boolean,
-        temperature: Float,
+        wifiSignalDbm: Int,
+        isMicOperational: Boolean,
         thresholdDb: Int
     ) {
         if (activeControlClients.isEmpty()) return
@@ -180,9 +204,38 @@ class RoomServer(
                 put("status", status.name)
                 put("battery", batteryPercent)
                 put("isCharging", isCharging)
-                put("temp", temperature)
+                put("wifiRssi", wifiSignalDbm)
+                put("isMicOperational", isMicOperational)
                 put("threshold", thresholdDb)
                 put("timestamp", System.currentTimeMillis())
+            }.toString()
+
+            val deadWriters = mutableListOf<PrintWriter>()
+            for (writer in activeControlClients) {
+                try {
+                    writer.println(json)
+                } catch (_: Exception) {
+                    deadWriters.add(writer)
+                }
+            }
+            activeControlClients.removeAll(deadWriters)
+        }
+    }
+
+    fun broadcastAlertEvent(event: RoomAlertEvent) {
+        if (activeControlClients.isEmpty()) return
+        scope.launch {
+            val json = JSONObject().apply {
+                put("type", "ROOM_ALERT_EVENT")
+                put("eventId", event.eventId)
+                put("roomId", event.roomId)
+                put("roomName", event.roomName)
+                put("timestamp", event.timestamp)
+                put("levelReachedDb", event.levelReachedDb)
+                put("thresholdDb", event.thresholdDb)
+                put("eventType", event.eventType.name)
+                put("durationSeconds", event.durationSeconds)
+                put("notes", event.notes)
             }.toString()
 
             val deadWriters = mutableListOf<PrintWriter>()
@@ -202,6 +255,7 @@ class RoomServer(
         controlServerJob?.cancel()
         audioServerJob?.cancel()
         talkbackServerJob?.cancel()
+        audioDispatcherJob?.cancel()
         try { controlServerSocket?.close() } catch (_: Exception) {}
         try { audioServerSocket?.close() } catch (_: Exception) {}
         try { talkbackServerSocket?.close() } catch (_: Exception) {}

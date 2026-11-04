@@ -1,10 +1,10 @@
 package com.example
 
 import android.Manifest
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
-import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -14,7 +14,6 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Surface
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
@@ -39,6 +38,8 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
+        handleNotificationNavigation(intent)
+
         setContent {
             MyApplicationTheme {
                 val uiState by viewModel.uiState.collectAsStateWithLifecycle()
@@ -53,7 +54,7 @@ class MainActivity : ComponentActivity() {
 
                 val notifPermissionLauncher = rememberLauncherForActivityResult(
                     contract = ActivityResultContracts.RequestPermission()
-                ) { /* optional */ }
+                ) { /* Notification permission granted/denied */ }
 
                 LaunchedEffect(Unit) {
                     if (ContextCompat.checkSelfPermission(
@@ -72,17 +73,6 @@ class MainActivity : ComponentActivity() {
                         ) {
                             notifPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
                         }
-                    }
-                }
-
-                DisposableEffect(uiState.currentRole) {
-                    if (uiState.currentRole == DeviceRole.ROOM_UNIT) {
-                        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-                    } else {
-                        window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-                    }
-                    onDispose {
-                        window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
                     }
                 }
 
@@ -130,7 +120,8 @@ class MainActivity : ComponentActivity() {
                                     onBack = { viewModel.selectDetailRoom(null) },
                                     onToggleListen = { viewModel.toggleAudioListening(uiState.selectedDetailRoom!!) },
                                     onTalkBackClick = { viewModel.openTalkBack(uiState.selectedDetailRoom!!) },
-                                    onThresholdChanged = { viewModel.remoteUpdateThreshold(uiState.selectedDetailRoom!!, it) }
+                                    onThresholdChanged = { viewModel.remoteUpdateThreshold(uiState.selectedDetailRoom!!, it) },
+                                    onAcknowledgeAlert = { viewModel.acknowledgeAlert(uiState.selectedDetailRoom!!.id) }
                                 )
                             } else {
                                 BackHandler {
@@ -139,14 +130,14 @@ class MainActivity : ComponentActivity() {
 
                                 MonitorDashboardScreen(
                                     rooms = uiState.monitoredRooms,
+                                    activeAlerts = uiState.activeAlerts,
                                     activeListeningRoomId = uiState.activeListeningRoomId,
-                                    activeNoiseAlert = uiState.activeNoiseAlert,
-                                    noiseHistory = uiState.noiseHistory,
                                     localIp = uiState.localIpAddress,
                                     onRoomClick = { viewModel.selectDetailRoom(it) },
                                     onToggleListen = { viewModel.toggleAudioListening(it) },
                                     onTalkBackClick = { viewModel.openTalkBack(it) },
-                                    onDismissAlert = { viewModel.dismissNoiseAlert() },
+                                    onAcknowledgeAlert = { viewModel.acknowledgeAlert(it) },
+                                    onAcknowledgeAll = { viewModel.acknowledgeAllAlerts() },
                                     onOpenSettings = { viewModel.openSettings() },
                                     onSwitchRole = { viewModel.selectRole(DeviceRole.NONE) }
                                 )
@@ -176,6 +167,21 @@ class MainActivity : ComponentActivity() {
                         )
                     }
                 }
+            }
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        handleNotificationNavigation(intent)
+    }
+
+    private fun handleNotificationNavigation(intent: Intent?) {
+        val targetRoomId = intent?.getStringExtra("selected_room_id")
+        if (targetRoomId != null) {
+            val matching = viewModel.uiState.value.monitoredRooms.find { it.id == targetRoomId }
+            if (matching != null) {
+                viewModel.selectDetailRoom(matching)
             }
         }
     }

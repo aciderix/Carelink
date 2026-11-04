@@ -25,7 +25,6 @@ class LanDiscoveryManager {
 
     data class DiscoveredRoomBeacon(
         val id: String,
-        val name: String,
         val ipAddress: String,
         val controlPort: Int = 9877,
         val audioPort: Int = 9878,
@@ -43,9 +42,11 @@ class LanDiscoveryManager {
     }
 
     /**
-     * Start broadcasting presence as a Room Unit over UDP
+     * Start broadcasting presence as a Room Unit over UDP.
+     * Note: For privacy in care facilities, resident personal names are NOT included
+     * in plaintext discovery broadcasts; only the technical room installation UUID is sent.
      */
-    fun startBroadcasting(unitId: String, unitName: String) {
+    fun startBroadcasting(unitId: String) {
         stop()
         broadcastJob = scope.launch {
             var broadcastSocket: DatagramSocket? = null
@@ -57,7 +58,6 @@ class LanDiscoveryManager {
                     val beaconJson = JSONObject().apply {
                         put("type", "CARELINK_ROOM_BEACON")
                         put("id", unitId)
-                        put("name", unitName)
                         put("controlPort", 9877)
                         put("audioPort", 9878)
                         put("talkbackPort", 9879)
@@ -74,18 +74,18 @@ class LanDiscoveryManager {
                         Log.d("LanDiscovery", "Broadcast send error: ${e.message}")
                     }
 
-                    kotlinx.coroutines.delay(1800)
+                    kotlinx.coroutines.delay(2000)
                 }
             } catch (e: Exception) {
                 Log.d("LanDiscovery", "Broadcaster error: ${e.message}")
             } finally {
-                broadcastSocket?.close()
+                try { broadcastSocket?.close() } catch (_: Exception) {}
             }
         }
     }
 
     /**
-     * Start listening for Room Unit beacons as a Caregiver Monitor Unit
+     * Start listening for Room Unit beacons on the caregiver monitor device.
      */
     fun startListening() {
         stop()
@@ -111,7 +111,6 @@ class LanDiscoveryManager {
                         if (json.optString("type") == "CARELINK_ROOM_BEACON") {
                             val beacon = DiscoveredRoomBeacon(
                                 id = json.optString("id"),
-                                name = json.optString("name", "Chambre"),
                                 ipAddress = senderIp,
                                 controlPort = json.optInt("controlPort", 9877),
                                 audioPort = json.optInt("audioPort", 9878),
@@ -128,7 +127,7 @@ class LanDiscoveryManager {
             } catch (e: Exception) {
                 Log.d("LanDiscovery", "Listener error: ${e.message}")
             } finally {
-                socket?.close()
+                try { socket?.close() } catch (_: Exception) {}
                 socket = null
             }
         }

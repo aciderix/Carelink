@@ -2,29 +2,21 @@ package com.example.ui
 
 import android.app.Application
 import android.content.Context
-import android.media.AudioManager
-import android.media.ToneGenerator
-import android.os.Build
-import android.os.VibrationEffect
-import android.os.Vibrator
-import android.os.VibratorManager
 import androidx.lifecycle.AndroidViewModel
-import com.example.audio.AudioCaptureEngine
+import androidx.lifecycle.viewModelScope
 import com.example.data.PreferencesManager
 import com.example.model.DeviceRole
-import com.example.model.NoiseEvent
+import com.example.model.RoomAlertEvent
 import com.example.model.RoomStatus
 import com.example.model.RoomUnitState
-import com.example.network.LanDiscoveryManager
-import com.example.network.MonitorClient
 import com.example.network.NetworkUtils
-import com.example.network.RoomServer
+import com.example.service.MonitorMonitoringService
+import com.example.service.RoomMonitoringService
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
-import org.json.JSONObject
-import java.util.UUID
+import kotlinx.coroutines.launch
 
 data class MainUiState(
     val currentRole: DeviceRole = DeviceRole.NONE,
@@ -32,20 +24,24 @@ data class MainUiState(
     val isWifiConnected: Boolean = true,
 
     // Room Unit Mode (Transmitter)
+    val isRoomServiceRunning: Boolean = false,
     val roomUnitName: String = "Chambre 1",
-    val roomUnitId: String = "room_local",
-    val roomCurrentDb: Int = 22,
+    val roomUnitId: String = "",
+    val roomCurrentDb: Int = 0,
     val roomThresholdDb: Int = 55,
     val roomStatus: RoomStatus = RoomStatus.CALM,
     val isCaregiverTalkingToRoom: Boolean = false,
+    val isMicOperational: Boolean = true,
+    val micErrorMessage: String? = null,
 
     // Monitor Unit Mode (Caregiver Multi-Room Dashboard)
+    val isMonitorServiceRunning: Boolean = false,
     val monitoredRooms: List<RoomUnitState> = emptyList(),
+    val activeAlerts: List<RoomAlertEvent> = emptyList(),
     val activeListeningRoomId: String? = null,
+    val isTransmittingVoice: Boolean = false,
     val talkBackRoom: RoomUnitState? = null,
     val selectedDetailRoom: RoomUnitState? = null,
-    val activeNoiseAlert: NoiseEvent? = null,
-    val noiseHistory: List<NoiseEvent> = emptyList(),
 
     // Dialogs
     val isSettingsOpen: Boolean = false
@@ -60,56 +56,70 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         MainUiState(
             currentRole = prefs.role,
             roomUnitName = prefs.roomName,
+            roomUnitId = prefs.installationId,
             roomThresholdDb = prefs.defaultSensitivityDb
         )
     )
     val uiState: StateFlow<MainUiState> = _uiState.asStateFlow()
 
-    private val audioCaptureEngine = AudioCaptureEngine(context)
-    private val discoveryManager = LanDiscoveryManager()
-    private val roomServer = RoomServer()
-    private val monitorClient = MonitorClient()
-
-    private var toneGenerator: ToneGenerator? = null
-    private var vibrator: Vibrator? = null
-
     init {
         updateNetworkInfo()
-        setupAudioAlerts()
 
-        discoveryManager.addBeaconListener { beacon ->
-            handleDiscoveredRoom(beacon)
+        // Observe Room Monitoring Service state
+        viewModelScope.launch {
+            RoomMonitoringService.serviceState.collect { roomState ->
+                _uiState.update { current ->
+                    current.copy(
+                        isRoomServiceRunning = roomState.isRunning,
+                        roomUnitName = roomState.roomName.ifEmpty { prefs.roomName },
+                        roomUnitId = roomState.roomId.ifEmpty { prefs.installationId },
+                        roomCurrentDb = roomState.currentDecibels,
+                        roomThresholdDb = roomState.thresholdDb,
+                        roomStatus = roomState.status,
+                        isCaregiverTalkingToRoom = roomState.isCaregiverTalking,
+                        isMicOperational = roomState.isMicOperational,
+                        micErrorMessage = roomState.errorMessage
+                    )
+                }
+            }
         }
 
-        roomServer.onCommandReceived = { cmd ->
-            handleRemoteCommandOnRoom(cmd)
-        }
-        roomServer.onTalkBackStatusChanged = { isTalking ->
-            _uiState.update { it.copy(isCaregiverTalkingToRoom = isTalking) }
+        // Observe Monitor Monitoring Service state
+        viewModelScope.launch {
+            MonitorMonitoringService.serviceState.collect { monitorState ->
+                _uiState.update { current ->
+                    val updatedSelected = if (current.selectedDetailRoom != null) {
+                        monitorState.monitoredRooms.find { it.id == current.selectedDetailRoom.id }
+                            ?: current.selectedDetailRoom
+                    } else null
+
+                    current.copy(
+                        isMonitorServiceRunning = monitorState.isRunning,
+                        monitoredRooms = monitorState.monitoredRooms,
+                        activeAlerts = monitorState.activeAlerts,
+                        activeListeningRoomId = monitorState.activeListeningRoomId,
+                        isTransmittingVoice = monitorState.isTransmittingVoice,
+                        selectedDetailRoom = updatedSelected
+                    )
+                }
+            }
         }
 
-        monitorClient.onRoomTelemetryReceived = { updatedRoom ->
-            handleRoomTelemetry(updatedRoom)
-        }
-
-        if (prefs.role == DeviceRole.ROOM_UNIT) {
-            startRoomUnitMode()
-        } else if (prefs.role == DeviceRole.MONITOR_UNIT) {
-            startMonitorUnitMode()
-        }
-    }
-
-    private fun setupAudioAlerts() {
-        try {
-            toneGenerator = ToneGenerator(AudioManager.STREAM_NOTIFICATION, 80)
-        } catch (_: Exception) {}
-
-        vibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            val vibratorManager = context.getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as? VibratorManager
-            vibratorManager?.defaultVibrator
-        } else {
-            @Suppress("DEPRECATION")
-            context.getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
+        // Start corresponding service if role was persisted
+        when (prefs.role) {
+            DeviceRole.ROOM_UNIT -> {
+                RoomMonitoringService.startService(
+                    context,
+                    roomName = prefs.roomName,
+                    thresholdDb = prefs.defaultSensitivityDb
+                )
+            }
+            DeviceRole.MONITOR_UNIT -> {
+                MonitorMonitoringService.startService(context)
+            }
+            DeviceRole.NONE -> {
+                // No service started
+            }
         }
     }
 
@@ -121,200 +131,52 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun selectRole(role: DeviceRole) {
         prefs.role = role
-        _uiState.update { it.copy(currentRole = role) }
+        _uiState.update { it.copy(currentRole = role, selectedDetailRoom = null, talkBackRoom = null) }
+
         when (role) {
-            DeviceRole.ROOM_UNIT -> startRoomUnitMode()
-            DeviceRole.MONITOR_UNIT -> startMonitorUnitMode()
-            DeviceRole.NONE -> stopAll()
-        }
-    }
-
-    // ==============================================================
-    // ROOM UNIT MODE (Transmitter in room)
-    // ==============================================================
-    private fun startRoomUnitMode() {
-        stopMonitorUnitMode()
-        updateNetworkInfo()
-
-        audioCaptureEngine.thresholdDecibels = _uiState.value.roomThresholdDb
-        audioCaptureEngine.addTelemetryListener { db, isAlert ->
-            val status = when {
-                isAlert -> RoomStatus.ALERT
-                db >= _uiState.value.roomThresholdDb - 10 -> RoomStatus.ACTIVITY
-                else -> RoomStatus.CALM
-            }
-            _uiState.update {
-                it.copy(
-                    roomCurrentDb = db,
-                    roomStatus = status
+            DeviceRole.ROOM_UNIT -> {
+                MonitorMonitoringService.stopService(context)
+                RoomMonitoringService.startService(
+                    context,
+                    roomName = prefs.roomName,
+                    thresholdDb = prefs.defaultSensitivityDb
                 )
             }
-
-            val state = _uiState.value
-            roomServer.broadcastTelemetry(
-                unitId = state.roomUnitId,
-                unitName = state.roomUnitName,
-                decibels = db,
-                status = status,
-                batteryPercent = 88,
-                isCharging = true,
-                temperature = 20.6f,
-                thresholdDb = state.roomThresholdDb
-            )
+            DeviceRole.MONITOR_UNIT -> {
+                RoomMonitoringService.stopService(context)
+                MonitorMonitoringService.startService(context)
+            }
+            DeviceRole.NONE -> {
+                RoomMonitoringService.stopService(context)
+                MonitorMonitoringService.stopService(context)
+            }
         }
-
-        audioCaptureEngine.addPacketListener { packet ->
-            roomServer.broadcastAudioPacket(packet)
-        }
-
-        audioCaptureEngine.startCapture()
-        roomServer.start()
-        discoveryManager.startBroadcasting(
-            unitId = _uiState.value.roomUnitId,
-            unitName = _uiState.value.roomUnitName
-        )
     }
 
-    private fun stopRoomUnitMode() {
-        audioCaptureEngine.stopCapture()
-        roomServer.stop()
-        discoveryManager.stop()
-    }
-
+    // ==============================================================
+    // ROOM UNIT ACTIONS
+    // ==============================================================
     fun setRoomUnitName(name: String) {
         prefs.roomName = name
         _uiState.update { it.copy(roomUnitName = name) }
-        discoveryManager.startBroadcasting(
-            unitId = _uiState.value.roomUnitId,
-            unitName = name
-        )
+        RoomMonitoringService.updateSettings(context, roomName = name)
     }
 
     fun setRoomThreshold(db: Int) {
         prefs.defaultSensitivityDb = db
-        audioCaptureEngine.thresholdDecibels = db
         _uiState.update { it.copy(roomThresholdDb = db) }
+        RoomMonitoringService.updateSettings(context, thresholdDb = db)
     }
 
     fun triggerRoomManualNoiseSpike() {
-        audioCaptureEngine.triggerManualNoiseSpike()
-    }
-
-    private fun handleRemoteCommandOnRoom(cmd: JSONObject) {
-        when (cmd.optString("cmd")) {
-            "SET_THRESHOLD" -> {
-                val db = cmd.optInt("value", 55)
-                setRoomThreshold(db)
-            }
-        }
+        RoomMonitoringService.triggerManualSpike(context)
     }
 
     // ==============================================================
-    // MONITOR UNIT MODE (Caregiver Multi-Room Dashboard)
+    // MONITOR UNIT ACTIONS
     // ==============================================================
-    private fun startMonitorUnitMode() {
-        stopRoomUnitMode()
-        updateNetworkInfo()
-        discoveryManager.startListening()
-    }
-
-    private fun stopMonitorUnitMode() {
-        discoveryManager.stop()
-        monitorClient.disconnectAll()
-    }
-
-    private fun handleDiscoveredRoom(beacon: LanDiscoveryManager.DiscoveredRoomBeacon) {
-        val existing = _uiState.value.monitoredRooms.find { it.id == beacon.id }
-        if (existing == null) {
-            val newRoom = RoomUnitState(
-                id = beacon.id,
-                name = beacon.name,
-                ipAddress = beacon.ipAddress,
-                port = beacon.controlPort,
-                status = RoomStatus.CALM
-            )
-            _uiState.update { it.copy(monitoredRooms = it.monitoredRooms + newRoom) }
-            monitorClient.connectToRoom(beacon.id, beacon.ipAddress, beacon.controlPort)
-        }
-    }
-
-    private fun handleRoomTelemetry(updatedRoom: RoomUnitState) {
-        _uiState.update { current ->
-            val list = current.monitoredRooms.toMutableList()
-            val index = list.indexOfFirst { it.id == updatedRoom.id }
-            if (index != -1) {
-                val previous = list[index]
-                list[index] = updatedRoom.copy(
-                    isAudioStreaming = monitorClient.isListening(updatedRoom.id),
-                    isListeningToAudio = previous.isListeningToAudio
-                )
-            } else {
-                list.add(updatedRoom)
-            }
-
-            var newAlert = current.activeNoiseAlert
-            val newHistory = current.noiseHistory.toMutableList()
-            if (updatedRoom.status == RoomStatus.ALERT) {
-                if (newAlert == null || newAlert.roomName != updatedRoom.name) {
-                    val event = NoiseEvent(
-                        id = UUID.randomUUID().toString(),
-                        roomName = updatedRoom.name,
-                        timestamp = System.currentTimeMillis(),
-                        durationSeconds = 6,
-                        maxDecibels = updatedRoom.currentDecibels,
-                        notes = "Bruit anormal (> ${updatedRoom.noiseThresholdDb} dB)"
-                    )
-                    newAlert = event
-                    newHistory.add(0, event)
-                    triggerAlertFeedback()
-                }
-            } else if (newAlert != null && newAlert.roomName == updatedRoom.name) {
-                newAlert = null
-            }
-
-            current.copy(
-                monitoredRooms = list,
-                activeNoiseAlert = newAlert,
-                noiseHistory = newHistory.take(30)
-            )
-        }
-    }
-
-    private fun triggerAlertFeedback() {
-        if (prefs.isVibrationAlertEnabled) {
-            try {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                    vibrator?.vibrate(VibrationEffect.createWaveform(longArrayOf(0, 300, 150, 300), -1))
-                } else {
-                    @Suppress("DEPRECATION")
-                    vibrator?.vibrate(longArrayOf(0, 300, 150, 300), -1)
-                }
-            } catch (_: Exception) {}
-        }
-
-        if (prefs.isSoundAlertEnabled) {
-            try {
-                toneGenerator?.startTone(ToneGenerator.TONE_PROP_BEEP2, 450)
-            } catch (_: Exception) {}
-        }
-    }
-
-    fun dismissNoiseAlert() {
-        _uiState.update { it.copy(activeNoiseAlert = null) }
-    }
-
     fun toggleAudioListening(unit: RoomUnitState) {
-        val currentListeningId = _uiState.value.activeListeningRoomId
-        if (currentListeningId == unit.id) {
-            monitorClient.stopListeningToAudio(unit.id)
-            _uiState.update { it.copy(activeListeningRoomId = null) }
-        } else {
-            if (currentListeningId != null) {
-                monitorClient.stopListeningToAudio(currentListeningId)
-            }
-            monitorClient.startListeningToAudio(unit.id, unit.ipAddress)
-            _uiState.update { it.copy(activeListeningRoomId = unit.id) }
-        }
+        MonitorMonitoringService.toggleListenAudio(context, unit.id, unit.ipAddress)
     }
 
     fun openTalkBack(unit: RoomUnitState) {
@@ -322,19 +184,28 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun closeTalkBack() {
+        MonitorMonitoringService.stopTalkBack(context)
         _uiState.update { it.copy(talkBackRoom = null) }
     }
 
     fun startSpeakingToRoom(unit: RoomUnitState) {
-        // Stream voice to room
+        MonitorMonitoringService.startTalkBack(context, unit.id, unit.ipAddress)
     }
 
     fun stopSpeakingToRoom(unit: RoomUnitState) {
-        // Stop streaming
+        MonitorMonitoringService.stopTalkBack(context)
     }
 
     fun remoteUpdateThreshold(unit: RoomUnitState, thresholdDb: Int) {
-        monitorClient.sendThresholdUpdate(unit.id, thresholdDb)
+        MonitorMonitoringService.sendRemoteThreshold(context, unit.id, thresholdDb)
+    }
+
+    fun acknowledgeAlert(roomId: String) {
+        MonitorMonitoringService.acknowledgeAlert(context, roomId)
+    }
+
+    fun acknowledgeAllAlerts() {
+        MonitorMonitoringService.acknowledgeAll(context)
     }
 
     fun selectDetailRoom(unit: RoomUnitState?) {
@@ -349,14 +220,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _uiState.update { it.copy(isSettingsOpen = false) }
     }
 
-    private fun stopAll() {
-        stopRoomUnitMode()
-        stopMonitorUnitMode()
-    }
-
     override fun onCleared() {
         super.onCleared()
-        stopAll()
-        toneGenerator?.release()
+        // Note: Services intentionally keep running in foreground when UI is closed or destroyed.
     }
 }
