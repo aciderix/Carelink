@@ -37,7 +37,10 @@ class PairingStore(context: Context, private val vault: CredentialVault = Secure
     fun forget(id: String): Unit = synchronized(lock) {
         vault.write("rooms", JSONArray(rooms().filterNot { it.id == id }.map { it.json() }).toString())
     }
-    fun importCode(code: String) {
+    fun updateAddress(id: String, address: String): Unit = synchronized(lock) {
+        rooms().firstOrNull { it.id == id }?.let { save(it.copy(address = address)) }
+    }
+    fun importCode(code: String): PairedRoom {
         require(code.startsWith("CL2.")) { "Code CareLink 2 attendu" }
         require(code.length < 12000)
         val j = JSONObject(String(Base64.decode(code.removePrefix("CL2."), Base64.URL_SAFE or Base64.NO_WRAP)))
@@ -45,7 +48,9 @@ class PairingStore(context: Context, private val vault: CredentialVault = Secure
         val room = PairedRoom.parse(j)
         require(room.id.length in 1..80 && room.credential.length == 43)
         PinnedTrustManager.decode(room.certificate).checkValidity()
-        save(room.copy(enrolling = true))
+        val pending = room.copy(enrolling = true)
+        save(pending)
+        return pending
     }
     fun createCode(certificate: String, address: String): String = synchronized(lock) {
         enrollment = randomToken(); enrollmentExpiry = SystemClock.elapsedRealtime() + 120000

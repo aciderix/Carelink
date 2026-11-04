@@ -18,7 +18,8 @@ class RoomMonitoringService : Service() {
     data class RoomServiceState(val isRunning: Boolean = false, val roomId: String = "", val roomName: String = "",
         val currentDecibels: Int = 0, val thresholdDb: Int = 55, val status: RoomStatus = RoomStatus.VERIFYING,
         val isMicOperational: Boolean = false, val errorMessage: String? = null, val isCaregiverTalking: Boolean = false,
-        val connectedMonitors: Int = 0, val captureAgeMs: Long = Long.MAX_VALUE, val samples: Long = 0)
+        val connectedMonitors: Int = 0, val captureAgeMs: Long = Long.MAX_VALUE, val samples: Long = 0,
+        val localAddress: String = "", val connectionDiagnostic: String? = null)
     companion object {
         const val ACTION_START = "room.START"; const val ACTION_STOP = "room.STOP"
         const val ACTION_UPDATE_SETTINGS = "room.SETTINGS"; const val ACTION_TRIGGER_SPIKE = "room.TEST"
@@ -46,6 +47,7 @@ class RoomMonitoringService : Service() {
     @Volatile private var running = false
     @Volatile private var talking = false
     @Volatile private var fatal: String? = null
+    @Volatile private var connectionDiagnostic: String? = null
     override fun onBind(intent: Intent?): IBinder? = null
     override fun onCreate() {
         super.onCreate(); prefs = PreferencesManager(this); store = EventStore(this)
@@ -80,6 +82,7 @@ class RoomMonitoringService : Service() {
                 localServer.onCommand = { _, j -> prefs.defaultSensitivityDb = j.getInt("value") }
                 localServer.onTalkBackStatusChanged = { active -> talking = active; capture.analysisPaused = active }
                 localServer.onError = { fatal = it }
+                localServer.onConnectionDiagnostic = { connectionDiagnostic = it }
                 localServer.telemetry = { telemetry() }
                 localServer.start()
                 discovery = LanDiscoveryManager(this@RoomMonitoringService).also { it.startBroadcasting(prefs.installationId) }
@@ -113,7 +116,8 @@ class RoomMonitoringService : Service() {
                     }
                     _state.value = RoomServiceState(true, prefs.installationId, prefs.roomName, capture.currentLevelDb,
                         prefs.defaultSensitivityDb, status, capture.isOperational, error, talking,
-                        localServer.connectedMonitors, capture.captureAgeMs, capture.samplesCaptured)
+                        localServer.connectedMonitors, capture.captureAgeMs, capture.samplesCaptured,
+                        NetworkUtils.getLocalIpAddress(this@RoomMonitoringService), connectionDiagnostic)
                     if (error != null && error != lastError && !talking) {
                         store.put("room", RoomAlertEvent(roomId = prefs.installationId, roomName = prefs.roomName,
                             eventType = AlertEventType.MIC_ERROR, notes = error, remote = true))

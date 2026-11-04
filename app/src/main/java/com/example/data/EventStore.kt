@@ -5,15 +5,49 @@ import android.content.Context
 import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
 import com.example.model.RoomAlertEvent
+import com.example.model.RoomUnitState
+import com.example.model.AlertEventType
 
 /** Durable journal. Only resolved records expire; pending events are never silently evicted. */
-class EventStore(context: Context) : SQLiteOpenHelper(context.applicationContext, "carelink-events.db", null, 1) {
+class EventStore(context: Context) : SQLiteOpenHelper(context.applicationContext, "carelink-events.db", null, 2) {
     override fun onCreate(db: SQLiteDatabase) {
         db.execSQL("CREATE TABLE events (side TEXT NOT NULL,id TEXT NOT NULL,body TEXT NOT NULL,resolved INTEGER NOT NULL,created INTEGER NOT NULL,PRIMARY KEY(side,id))")
         db.execSQL("CREATE TABLE receipts (event TEXT NOT NULL,device TEXT NOT NULL,revision INTEGER NOT NULL DEFAULT 0,PRIMARY KEY(event,device))")
         db.execSQL("CREATE TABLE outbox (event TEXT PRIMARY KEY,room TEXT NOT NULL,action TEXT NOT NULL)")
+        createIncidents(db)
     }
-    override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) = Unit
+    private fun createIncidents(db: SQLiteDatabase) {
+        db.execSQL("CREATE TABLE IF NOT EXISTS incidents (room TEXT NOT NULL,kind TEXT NOT NULL,event TEXT NOT NULL,PRIMARY KEY(room,kind))")
+    }
+    override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) { if (oldVersion < 2) createIncidents(db) }
+    /** Latch the physical incident independently of a user's acknowledgement or closure. */
+    @Synchronized fun incident(room: RoomUnitState, kind: AlertEventType, message: String): RoomAlertEvent? {
+        val db = writableDatabase
+        db.beginTransaction()
+        try {
+            val latched = db.rawQuery("SELECT event FROM incidents WHERE room=? AND kind=?", arrayOf(room.id, kind.name)).use { it.moveToFirst() }
+            if (latched) { db.setTransactionSuccessful(); return null }
+            val existing = all("monitor").firstOrNull { !it.remote && !it.resolved && it.roomId == room.id && it.eventType == kind }
+            val event = existing ?: RoomAlertEvent(roomId = room.id, roomName = room.name, eventType = kind, notes = message)
+            if (existing == null) put("monitor", event)
+            check(db.insertOrThrow("incidents", null, ContentValues().apply {
+                put("room", room.id); put("kind", kind.name); put("event", event.eventId)
+            }) != -1L)
+            db.setTransactionSuccessful()
+            return if (existing == null) event else null
+        } finally { db.endTransaction() }
+    }
+    @Synchronized fun recoverIncident(roomId: String, kind: AlertEventType): List<RoomAlertEvent> {
+        val db = writableDatabase
+        db.beginTransaction()
+        try {
+            db.delete("incidents", "room=? AND kind=?", arrayOf(roomId, kind.name))
+            val recovered = all("monitor").filter { !it.remote && !it.resolved && it.roomId == roomId && it.eventType == kind }
+                .mapNotNull { transition("monitor", it.eventId, "Système · état rétabli", true) }
+            db.setTransactionSuccessful()
+            return recovered
+        } finally { db.endTransaction() }
+    }
     @Synchronized fun put(side: String, event: RoomAlertEvent): Boolean {
         val previous = get(side, event.eventId)
         if (previous != null) {

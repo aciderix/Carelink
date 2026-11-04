@@ -4,9 +4,9 @@ Application Android de détection sonore et de communication sur réseau local, 
 
 ## Télécharger la version d’essai
 
-L’APK testé est inclus dans cette branche : **[CareLink 2.0.0-debug — télécharger](https://github.com/aciderix/Carelink/raw/refs/heads/carelink-v2-ameliorations-apk/downloads/CareLink-2.0.0-debug.apk)**. Depuis GitHub, ouvrir le fichier puis utiliser **Download raw file** si nécessaire. Le bouton **Code → Download ZIP** récupère aussi les sources et l’APK.
+L’APK d’essai est inclus dans cette branche : **[CareLink 2.0.1-debug — télécharger](https://github.com/aciderix/Carelink/raw/refs/heads/carelink-v2-ameliorations-apk/downloads/CareLink-2.0.1-debug.apk)**. Depuis GitHub, ouvrir le fichier puis utiliser **Download raw file** si nécessaire. Le bouton **Code → Download ZIP** récupère aussi les sources et l’APK.
 
-- [Dossier de téléchargement](downloads/) et [empreinte SHA-256](downloads/CareLink-2.0.0-debug.apk.sha256).
+- [Dossier de téléchargement](downloads/) et [empreinte SHA-256](downloads/CareLink-2.0.1-debug.apk.sha256).
 - [Résultats de validation](docs/RESULTATS_VALIDATION.md) et [consignes de qualification](docs/VALIDATION.md).
 - [Aperçu de l’accueil](docs/screenshots/welcome.png) et [tableau de surveillance](docs/screenshots/monitor-empty.png).
 
@@ -23,6 +23,14 @@ Il s’agit d’une version d’essai distincte de l’application de production
 - Interface sombre, navigation Surveillance / Événements / Réglages, protection des actions sensibles par code et notifications sans acquittement accidentel depuis l’écran verrouillé.
 - Pas de SDK Firebase, pas de service cloud applicatif et pas d’enregistrement audio conservé.
 
+## Connexion et découverte dans la version 2.0.1
+
+La recherche automatique utilise mDNS et UDP, et suit les changements d’adresse des chambres appairées. Les chambres détectées mais non autorisées sont affichées lors de l’ajout ; le QR reste nécessaire pour le premier accès.
+
+Le scan est désormais présenté comme un appairage en attente tant que la chambre n’a pas confirmé la connexion. Une panne continue conserve le même incident, y compris après sa clôture ou un redémarrage, pour éviter les nouvelles alertes en boucle. La prise en charge coupe ses rappels. La reprise de la télémétrie clôt l’incident local de coupure.
+
+Si deux téléphones ne se voient pas sur le Wi-Fi de l’établissement, consulter le [guide de dépannage réseau et Xiaomi/HyperOS](docs/DEPANNAGE_RESEAU.md), qui indique aussi les flux à faire vérifier par l’équipe informatique.
+
 ## Installer et appairer
 
 1. Installer **la même version 2** sur les deux téléphones, connectés au réseau local autorisé.
@@ -38,7 +46,7 @@ Les autres téléphones du LAN ne sont pas ajoutés automatiquement. La révocat
 
 - **À vérifier** : événement conservé, non pris en charge ; rappels selon les réglages.
 - **Pris en charge** : transition durable confirmée, événement encore visible.
-- **Résolu** : clôture explicite, conservée sept jours après sa résolution avant nettoyage. Un événement non résolu n’est jamais supprimé par la rétention.
+- **Résolu** : clôture humaine, ou retour technique confirmé pour un incident local, conservée sept jours après sa résolution avant nettoyage. Un événement non résolu n’est jamais supprimé par la rétention.
 - Les événements sonores et de test proviennent de la chambre. Les incidents de connexion/batterie/capture observés par un veilleur sont locaux à ce poste ; leur résolution ne répare pas l’état technique.
 - Les prises en charge des événements distants sont partagées avec les veilleurs appairés via la chambre. Pendant une coupure, elles restent dans la file locale et sont confirmées à la reconnexion.
 

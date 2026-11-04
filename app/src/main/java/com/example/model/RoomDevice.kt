@@ -37,5 +37,5 @@ data class RoomUnitState(
     val batteryPercent: Int = -1, val isCharging: Boolean = false, val wifiSignalDbm: Int = 0,
     val isMicOperational: Boolean = false, val lastSeenTimestamp: Long = 0L, val isAudioStreaming: Boolean = false,
     val activeAlert: RoomAlertEvent? = null, val captureAgeMs: Long = Long.MAX_VALUE, val samplesCaptured: Long = 0,
-    val temperatureC: Float? = null, val diagnostic: String = "Vérification en attente"
+    val temperatureC: Float? = null, val diagnostic: String = "Vérification en attente", val enrollmentPending: Boolean = false
 )

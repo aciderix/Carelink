@@ -23,6 +23,8 @@ object NetworkUtils {
             localNetwork(context)?.let { n ->
                 manager.getLinkProperties(n)?.linkAddresses?.firstOrNull { it.address is Inet4Address }?.let { return it.address.hostAddress ?: "" }
             }
+            // Never put a cellular or VPN address in a QR intended for the local Wi-Fi.
+            return ""
         }
         return runCatching {
             Collections.list(NetworkInterface.getNetworkInterfaces()).filter { it.isUp && !it.isLoopback }

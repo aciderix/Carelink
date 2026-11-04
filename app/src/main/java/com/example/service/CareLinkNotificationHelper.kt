@@ -40,7 +40,7 @@ object CareLinkNotificationHelper {
         .setOngoing(true).setOnlyAlertOnce(true).setContentIntent(launch(context))
         .setVisibility(NotificationCompat.VISIBILITY_PRIVATE).setCategory(NotificationCompat.CATEGORY_SERVICE).build()
     fun post(context: Context, event: RoomAlertEvent, remind: Boolean = false) {
-        if (event.resolved) { cancel(context, event.eventId); return }
+        if (event.resolved || event.isAcknowledged) { cancel(context, event.eventId); return }
         val prefs = PreferencesManager(context)
         val title = if (event.isAcknowledged) "Prise en charge · ${event.roomName}" else "À vérifier · ${event.roomName}"
         val n = NotificationCompat.Builder(context, ALERTS).setSmallIcon(R.drawable.ic_stat_carelink)

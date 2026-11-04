@@ -28,6 +28,7 @@ class RoomServer(private val context: Context, private val store: EventStore) {
     var onCommand: ((String, JSONObject) -> Unit)? = null
     var onTalkBackStatusChanged: ((Boolean) -> Unit)? = null
     var onError: ((String) -> Unit)? = null
+    var onConnectionDiagnostic: ((String?) -> Unit)? = null
     fun start() {
         try {
             for ((port, channel) in listOf(9877 to "control", 9878 to "audio", 9879 to "talk")) {
@@ -58,6 +59,7 @@ class RoomServer(private val context: Context, private val store: EventStore) {
         var key: String? = null
         try {
             connection = transport.accept(socket, channel)
+            onConnectionDiagnostic?.invoke(null)
             key = "$channel:${connection.deviceId}"
             sessions.put(key, connection)?.close()
             when (channel) {
@@ -65,8 +67,12 @@ class RoomServer(private val context: Context, private val store: EventStore) {
                 "audio" -> stream(connection)
                 "talk" -> talk(connection)
             }
-        } catch (_: Exception) {
-            // Authentication errors deliberately reveal neither credentials nor resident details.
+        } catch (e: Exception) {
+            if (connection == null) onConnectionDiagnostic?.invoke(when (e) {
+                is PairingRejected -> "Appairage refusé : QR expiré, annulé ou accès révoqué. Générez un nouveau QR."
+                is javax.net.ssl.SSLException -> "Un téléphone a tenté une connexion, mais TLS a échoué. Vérifiez la version CareLink et la date des téléphones."
+                else -> "Tentative de connexion interrompue avant authentification. Réessayez avec un nouveau QR."
+            })
         } finally {
             if (key != null && connection != null) sessions.remove(key, connection)
             connection?.close(); runCatching { socket.close() }; count.decrementAndGet()

@@ -10,6 +10,7 @@ import androidx.lifecycle.viewModelScope
 import com.example.data.*
 import com.example.model.*
 import com.example.network.NetworkUtils
+import com.example.network.RoomAddresses
 import com.example.security.*
 import com.example.service.*
 import kotlinx.coroutines.*
@@ -67,8 +68,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         enrollmentJob = viewModelScope.launch(Dispatchers.IO) {
             previous?.join()
             try {
-                pairingCode.value = pairing.createCode(SecureTransport(context).certificate(), NetworkUtils.getLocalIpAddress(context))
-                for (left in 120 downTo 1) { pairingSeconds.value = left; delay(1000); if (!pairing.enrollmentOpen()) { message.value = "Veilleur appairé. Vérifiez la réception et les autorisations."; break } }
+                val address = NetworkUtils.getLocalIpAddress(context)
+                if (address.isBlank()) { message.value = "Connectez ce téléphone au Wi-Fi local avant d’ouvrir un QR"; return@launch }
+                pairingCode.value = pairing.createCode(SecureTransport(context).certificate(), address)
+                for (left in 120 downTo 1) { pairingSeconds.value = left; delay(1000); if (!pairing.enrollmentOpen()) { message.value = "Code fermé. Vérifiez la connexion sur les deux téléphones ; si elle n’apparaît pas, générez un nouveau QR."; break } }
             } catch (_: Exception) { message.value = "Impossible de créer l’appairage sécurisé sur cet appareil" }
             finally { pairingCode.value = null; pairingSeconds.value = 0; pairing.cancelEnrollment(); reloadPeers() }
         }
@@ -76,11 +79,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun cancelPairing() { enrollmentJob?.cancel(); pairingCode.value = null; pairing.cancelEnrollment() }
     fun importPairing(code: String) = viewModelScope.launch(Dispatchers.IO) {
         try {
-            pairing.importCode(code.trim()); MonitorMonitoringService.refresh(context)
+            val imported = pairing.importCode(code.trim()); MonitorMonitoringService.reconnect(context, imported.id)
             message.value = "Chambre ajoutée. Attendez sa vérification avant de commencer la surveillance."
         } catch (_: Exception) { message.value = "Code invalide. Vérifiez le QR et sa durée de validité." }
     }
     fun reloadPeers() = viewModelScope.launch(Dispatchers.IO) { runCatching { peers.value = pairing.monitors() } }
     fun revoke(id: String) = viewModelScope.launch(Dispatchers.IO) { pairing.revoke(id); reloadPeers() }
     fun forget(id: String) = MonitorMonitoringService.forget(context, id)
+    fun reconnect(id: String) = MonitorMonitoringService.reconnect(context, id)
+    fun refreshNetwork() = MonitorMonitoringService.refresh(context)
+    fun updateAddress(id: String, address: String) = viewModelScope.launch(Dispatchers.IO) {
+        if (!RoomAddresses.isLocalAddress(address.trim())) { message.value = "Saisissez l’adresse IP locale affichée sur la chambre"; return@launch }
+        pairing.updateAddress(id, address.trim()); MonitorMonitoringService.reconnect(context, id)
+    }
 }

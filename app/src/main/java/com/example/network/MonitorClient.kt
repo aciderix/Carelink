@@ -14,7 +14,7 @@ class MonitorClient(private val context: Context, private val store: EventStore)
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val pairing = PairingStore(context)
     private val jobs = ConcurrentHashMap<String, Job>()
-    private val addresses = ConcurrentHashMap<String, String>()
+    private val addresses = ConcurrentHashMap<String, RoomAddresses>()
     private val connections = ConcurrentHashMap<String, SecureSession>()
     private var audioJob: Job? = null
     @Volatile private var audioSession: SecureSession? = null
@@ -22,21 +22,25 @@ class MonitorClient(private val context: Context, private val store: EventStore)
     var onRoomTelemetryReceived: ((RoomUnitState) -> Unit)? = null
     var onRoomAlertReceived: ((RoomAlertEvent) -> Unit)? = null
     var onRoomDisconnected: ((String, String) -> Unit)? = null
+    var onRoomConnected: ((String, String) -> Unit)? = null
     var onListeningChanged: ((String?, String?) -> Unit)? = null
     var onSettingsApplied: ((String, Int) -> Unit)? = null
     @Synchronized fun connectToRoom(roomId: String, ipAddress: String, controlPort: Int = 9877) {
         if (pairing.rooms().none { it.id == roomId }) return
         if (connections.containsKey(roomId)) return // An unauthenticated beacon cannot redirect an established session.
-        if (ipAddress.isNotBlank()) addresses[roomId] = ipAddress
+        addresses.getOrPut(roomId) { RoomAddresses() }.offer(ipAddress)
         if (jobs[roomId]?.isActive == true) return
         jobs[roomId] = scope.launch {
             var backoff = 1000L
             while (isActive && pairing.rooms().any { it.id == roomId }) {
                 var session: SecureSession? = null
+                val saved = pairing.rooms().firstOrNull { it.id == roomId } ?: break
+                val room = saved.copy(address = addresses[roomId]?.next() ?: saved.address)
                 try {
-                    val room = pairing.rooms().first { it.id == roomId }.let { it.copy(address = addresses[roomId] ?: it.address) }
                     session = SecureTransport(context).connect(room, "control", controlPort)
+                    pairing.updateAddress(roomId, room.address)
                     connections[roomId] = session; backoff = 1000
+                    onRoomConnected?.invoke(roomId, room.address)
                     coroutineScope {
                         val activeSession = session
                         val sender = launch {
@@ -65,7 +69,7 @@ class MonitorClient(private val context: Context, private val store: EventStore)
                                         val age = j.getLong("captureAgeMs")
                                         val operational = j.getBoolean("isMicOperational") && age < 2000
                                         val reported = RoomStatus.valueOf(j.getString("status"))
-                                        val status = if (!operational && reported != RoomStatus.DEGRADED) RoomStatus.MIC_ERROR else reported
+                                        val status = if (!operational && reported !in listOf(RoomStatus.DEGRADED, RoomStatus.VERIFYING)) RoomStatus.MIC_ERROR else reported
                                         onRoomTelemetryReceived?.invoke(RoomUnitState(id = roomId, name = j.getString("name").take(80),
                                             ipAddress = room.address, status = status, currentDecibels = j.getInt("decibels"),
                                             noiseThresholdDb = j.getInt("threshold"), batteryPercent = j.getInt("battery"),
@@ -80,7 +84,7 @@ class MonitorClient(private val context: Context, private val store: EventStore)
                         } finally { sender.cancel(); activeSession.close() }
                     }
                 } catch (e: CancellationException) { throw e }
-                catch (e: Exception) { onRoomDisconnected?.invoke(roomId, "Connexion interrompue ou identité non vérifiée") }
+                catch (e: Exception) { onRoomDisconnected?.invoke(roomId, ConnectionDiagnostic.describe(e, room.address, room.enrolling)) }
                 finally { session?.let { connections.remove(roomId, it); it.close() } }
                 delay(backoff); backoff = (backoff * 2).coerceAtMost(15000)
             }
@@ -94,7 +98,7 @@ class MonitorClient(private val context: Context, private val store: EventStore)
             val player = AudioPlayerEngine(context)
             var local: SecureSession? = null
             try {
-                val room = pairing.rooms().first { it.id == roomId }.let { it.copy(address = addresses[roomId] ?: it.address) }
+                val room = pairing.rooms().first { it.id == roomId }
                 check(!room.enrolling)
                 local = SecureTransport(context).connect(room, "audio", 9878); audioSession = local
                 player.start()
@@ -116,7 +120,7 @@ class MonitorClient(private val context: Context, private val store: EventStore)
     fun startSpeaking(roomId: String) {
         stopListeningToAudio()
         val room = pairing.rooms().first { it.id == roomId }
-        talkBackTransmitter.startTransmitting(room.copy(address = addresses[roomId] ?: room.address))
+        talkBackTransmitter.startTransmitting(room)
     }
     fun stopSpeaking() = talkBackTransmitter.stopTransmitting()
     fun refresh() { pairing.rooms().forEach { connectToRoom(it.id, it.address) } }

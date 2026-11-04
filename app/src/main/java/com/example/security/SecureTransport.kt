@@ -7,6 +7,7 @@ import android.security.keystore.KeyProperties
 import android.util.Base64
 import com.example.data.PreferencesManager
 import com.example.network.NetworkUtils
+import com.example.network.PairingRejected
 import org.json.JSONObject
 import java.io.DataInputStream
 import java.io.DataOutputStream
@@ -15,7 +16,6 @@ import java.net.Socket
 import java.security.KeyPairGenerator
 import java.security.KeyStore
 import java.security.MessageDigest
-import java.security.Principal
 import java.security.PrivateKey
 import java.security.cert.CertificateException
 import java.security.cert.CertificateFactory
@@ -84,14 +84,8 @@ class SecureTransport(private val context: Context) {
     fun certificate(): String = Base64.encodeToString(identity().getCertificate("carelink-tls-v2").encoded, Base64.NO_WRAP)
     fun server(port: Int): SSLServerSocket {
         val store = identity()
-        val manager = object : X509ExtendedKeyManager() {
-            override fun getPrivateKey(alias: String?) = store.getKey("carelink-tls-v2", null) as PrivateKey
-            override fun getCertificateChain(alias: String?) = arrayOf(store.getCertificate("carelink-tls-v2") as X509Certificate)
-            override fun chooseServerAlias(k: String?, i: Array<out Principal>?, s: Socket?) = if (k == "EC") "carelink-tls-v2" else null
-            override fun getServerAliases(k: String?, i: Array<out Principal>?) = if (k == "EC") arrayOf("carelink-tls-v2") else null
-            override fun getClientAliases(k: String?, i: Array<out Principal>?) = null
-            override fun chooseClientAlias(k: Array<out String>?, i: Array<out Principal>?, s: Socket?) = null
-        }
+        val manager = RoomKeyManager(store.getKey("carelink-tls-v2", null) as PrivateKey,
+            arrayOf(store.getCertificate("carelink-tls-v2") as X509Certificate))
         val ssl = SSLContext.getInstance("TLS").apply { init(arrayOf(manager), null, null) }
         return (ssl.serverSocketFactory.createServerSocket() as SSLServerSocket).apply {
             reuseAddress = true; enabledProtocols = supportedProtocols.filter { it == "TLSv1.2" || (android.os.Build.VERSION.SDK_INT >= 29 && it == "TLSv1.3") }.toTypedArray()
@@ -105,7 +99,12 @@ class SecureTransport(private val context: Context) {
         require(hello.getInt("version") == 2 && hello.getString("roomId") == prefs.installationId)
         require(hello.getString("channel") == channel)
         val id = hello.getString("deviceId")
-        val credential = pairing.authorize(id, hello.getString("credential"), hello.optBoolean("enroll") && channel == "control")
+        val enrolling = hello.optBoolean("enroll") && channel == "control"
+        val credential = try { pairing.authorize(id, hello.getString("credential"), enrolling) }
+        catch (_: IllegalArgumentException) {
+            session.send(JSONObject().put("version", 2).put("type", "AUTH_ERROR"))
+            throw PairingRejected(enrolling)
+        }
         session.send(JSONObject().put("version", 2).put("credential", credential))
         return SecureSession(socket, id, credential)
     }
@@ -126,6 +125,7 @@ class SecureTransport(private val context: Context) {
             session.send(JSONObject().put("version", 2).put("roomId", room.id).put("deviceId", prefs.installationId)
                 .put("channel", channel).put("credential", room.credential).put("enroll", room.enrolling))
             val response = session.receiveJson(); require(response.getInt("version") == 2)
+            if (response.optString("type") == "AUTH_ERROR") throw PairingRejected(room.enrolling)
             if (room.enrolling) pairing.save(room.copy(credential = response.getString("credential"), enrolling = false))
             return session
         } catch (e: Exception) { runCatching { socket?.close() }; runCatching { raw.close() }; throw e }

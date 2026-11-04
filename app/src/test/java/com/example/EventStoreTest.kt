@@ -84,4 +84,27 @@ class EventStoreTest {
         store.prune(System.currentTimeMillis() + 8L * 24 * 3600 * 1000)
         assertEquals(listOf("pending"), store.all("room").map { it.eventId })
     }
+    @Test fun oneContinuousOutageCannotRealertAfterAcknowledgementClosureOrRestart() {
+        val room = RoomUnitState("room", "Chambre 12", "192.168.1.20")
+        val first = store.incident(room, AlertEventType.DISCONNECTION, "No network")!!
+        store.transition("monitor", first.eventId, "night-team", false)
+        assertNull(store.incident(room, AlertEventType.DISCONNECTION, "Still no network"))
+        store.transition("monitor", first.eventId, "night-team", true)
+        assertNull(store.incident(room, AlertEventType.DISCONNECTION, "Still disconnected"))
+        store.close(); store = EventStore(context)
+        assertNull(store.incident(room, AlertEventType.DISCONNECTION, "Restart during outage"))
+        store.recoverIncident(room.id, AlertEventType.DISCONNECTION)
+        val next = store.incident(room, AlertEventType.DISCONNECTION, "A new outage")!!
+        assertNotEquals(first.eventId, next.eventId)
+    }
+    @Test fun networkRecoveryClosesLocalOutageButKeepsSoundAndMicrophoneEvents() {
+        val room = RoomUnitState("room", "Chambre 12", "192.168.1.20")
+        store.put("monitor", event("sound"))
+        store.incident(room, AlertEventType.MIC_ERROR, "Microphone failed")
+        val outage = store.incident(room, AlertEventType.DISCONNECTION, "Disconnected")!!
+        assertEquals(listOf(outage.eventId), store.recoverIncident(room.id, AlertEventType.DISCONNECTION).map { it.eventId })
+        assertTrue(store.get("monitor", outage.eventId)!!.resolved)
+        assertFalse(store.get("monitor", "sound")!!.resolved)
+        assertFalse(store.all("monitor").single { it.eventType == AlertEventType.MIC_ERROR }.resolved)
+    }
 }

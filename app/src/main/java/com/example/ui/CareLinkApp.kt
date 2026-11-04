@@ -187,6 +187,8 @@ fun CareLinkApp(vm: MainViewModel, startRole: (DeviceRole) -> Unit,
                 selected != null -> RoomDetail(width, selected, monitor, vm,
                     listen = { vm.listen(selected.id) }, talk = { talkId = selected.id },
                     threshold = { value -> protect("Appliquer un seuil relatif de $value ?", requireProtection = true) { vm.remoteThreshold(selected.id, value) } },
+                    updateAddress = { address -> protect("Utiliser cette adresse réseau pour la chambre ?", requireProtection = true) { vm.updateAddress(selected.id, address) } },
+                    pair = { protect("Reprendre l’appairage avec un nouveau QR ?", requireProtection = true) { addRoom = true } },
                     forget = { protect("Retirer cette chambre des appareils attendus ? Ses événements seront conservés.", requireProtection = true) { vm.forget(selected.id); detailId = null } })
                 else -> Dashboard(width, monitor, add = { protect("Appairer une nouvelle chambre ?", requireProtection = true) { addRoom = true } },
                     select = { detailId = it }, events = { tab = 1 }, resume = { startRole(DeviceRole.MONITOR_UNIT) })
@@ -213,8 +215,15 @@ fun CareLinkApp(vm: MainViewModel, startRole: (DeviceRole) -> Unit,
     if (addRoom) {
         var input by remember { mutableStateOf("") }
         AlertDialog(onDismissRequest = { addRoom = false; scan = false }, title = { Text("Ajouter une chambre") },
-            text = { Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text("Ouvrez l’appairage sur le téléphone de la chambre. Seuls les appareils appairés apparaîtront dans votre surveillance.")
+            text = { Column(Modifier.heightIn(max = 560.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text("Les chambres sont recherchées automatiquement sur le Wi-Fi. Le QR autorise le premier accès ; un appareil détecté n’est pas encore appairé.")
+                Text(monitor.discoveryDiagnostic, style = MaterialTheme.typography.bodySmall, color = Quiet)
+                val known = monitor.monitoredRooms.map { it.id }.toSet()
+                val nearby = monitor.nearbyRooms.filterNot { it.id in known }.take(5)
+                if (nearby.isEmpty()) Text("Aucune nouvelle chambre détectée. Le scan QR fonctionne aussi sans découverte réseau.", style = MaterialTheme.typography.bodySmall)
+                nearby.forEach { found ->
+                    Text("Chambre détectée · ${found.id.take(8)} · ${found.ipAddress}", style = MaterialTheme.typography.bodySmall, color = Mint)
+                }
                 if (scan) PairingCamera(Modifier.fillMaxWidth().height(300.dp), onCode = { vm.importPairing(it); scan = false; addRoom = false }, onError = { vm.message.value = it; scan = false })
                 else Button(onClick = { requestCamera { scan = true } }, Modifier.fillMaxWidth()) { Icon(Icons.Default.QrCodeScanner, null); Spacer(Modifier.width(8.dp)); Text("Scanner le QR") }
                 OutlinedTextField(input, { input = it.take(12000) }, label = { Text("Ou coller le code CL2…") }, modifier = Modifier.fillMaxWidth(), maxLines = 3)
@@ -299,7 +308,7 @@ private suspend fun delayForPin() = kotlinx.coroutines.delay(1500)
                         Text(room.name, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
                         Icon(Icons.Default.ChevronRight, "Détails de la chambre")
                     }
-                    Text(room.status.label(), color = room.status.tint(), fontWeight = FontWeight.SemiBold)
+                    Text(if (room.enrollmentPending) "Appairage à terminer" else room.status.label(), color = room.status.tint(), fontWeight = FontWeight.SemiBold)
                     if (room.diagnostic.isNotBlank()) Text(room.diagnostic, color = Quiet, style = MaterialTheme.typography.bodyMedium)
                     Row(horizontalArrangement = Arrangement.spacedBy(18.dp)) {
                         Text(if (room.lastSeenTimestamp == 0L) "Aucune donnée validée" else "Dernière donnée : ${clock(room.lastSeenTimestamp)}", style = MaterialTheme.typography.labelMedium, color = Quiet)
@@ -336,16 +345,35 @@ private suspend fun delayForPin() = kotlinx.coroutines.delay(1500)
         if (!state.isRunning) item { Button(resume, Modifier.fillMaxWidth().heightIn(min = 52.dp)) { Text("Autoriser et reprendre") } }
         item { Card(colors = CardDefaults.cardColors(containerColor = Panel), shape = RoundedCornerShape(24.dp)) { Column(Modifier.padding(24.dp)) { Level(state.currentDecibels, state.thresholdDb, state.isMicOperational) } } }
         item { Text("Le son reste sur le réseau local. Aucun enregistrement audio n’est conservé.", color = Quiet) }
+        item { Note("Adresse Wi-Fi : ${state.localAddress.ifBlank { "indisponible" }} · port 9877\nLa découverte utilise mDNS et UDP. Sur un réseau invité ou isolé, l’équipe informatique doit autoriser les communications entre téléphones.") }
+        state.connectionDiagnostic?.let { error -> item { Note(error, true) } }
         item { OutlinedButton(pair, Modifier.fillMaxWidth().heightIn(min = 52.dp), enabled = state.isRunning) { Icon(Icons.Default.QrCode2, null); Spacer(Modifier.width(8.dp)); Text("Appairer un veilleur") } }
         item { Note("Pour modifier la chambre, le seuil ou tester la transmission, ouvrez les réglages professionnels. Le bouton Retour et l’extinction de l’écran n’arrêtent pas volontairement le service.") }
     }
 }
 @Composable private fun RoomDetail(modifier: Modifier, room: RoomUnitState, state: MonitorMonitoringService.MonitorServiceState, vm: MainViewModel,
-    listen: () -> Unit, talk: () -> Unit, threshold: (Int) -> Unit, forget: () -> Unit) {
+    listen: () -> Unit, talk: () -> Unit, threshold: (Int) -> Unit, updateAddress: (String) -> Unit, pair: () -> Unit, forget: () -> Unit) {
     var value by remember(room.noiseThresholdDb) { mutableFloatStateOf(room.noiseThresholdDb.toFloat()) }
+    var editAddress by remember { mutableStateOf(false) }
+    var address by remember(room.ipAddress) { mutableStateOf(room.ipAddress) }
     LazyColumn(modifier, contentPadding = PaddingValues(24.dp), verticalArrangement = Arrangement.spacedBy(20.dp)) {
         item { Text(room.name, style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Bold); Text(room.status.label(), color = room.status.tint()) }
         if (room.diagnostic.isNotBlank()) item { Note(room.diagnostic, true) }
+        if (room.enrollmentPending) item {
+            Note("Le QR a été lu, mais la chambre n’a pas encore confirmé l’accès. La surveillance de cette chambre n’est pas active ; aucune alarme de coupure n’est déclenchée à cette étape.")
+            OutlinedButton(pair, Modifier.fillMaxWidth()) { Text("Scanner un nouveau QR") }
+        }
+        item {
+            Text("Connexion locale · ${room.ipAddress.ifBlank { "adresse inconnue" }}:9877", color = Quiet)
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                TextButton(onClick = { vm.reconnect(room.id) }) { Text("Réessayer") }
+                TextButton(onClick = { editAddress = !editAddress }) { Text("Corriger l’adresse") }
+            }
+            if (editAddress) {
+                OutlinedTextField(address, { address = it.take(80) }, label = { Text("IP affichée sur le téléphone chambre") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                OutlinedButton(onClick = { updateAddress(address); editAddress = false }) { Text("Utiliser cette adresse") }
+            }
+        }
         item { Level(room.currentDecibels, room.noiseThresholdDb, room.isMicOperational) }
         item {
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -371,6 +399,7 @@ private suspend fun delayForPin() = kotlinx.coroutines.delay(1500)
         item { Text("Événements", style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Bold); Text("Chaque événement conserve son identité et son heure.", color = Quiet) }
         item { Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) { FilterChip(!history, { history = false }, label = { Text("En cours") }); FilterChip(history, { history = true }, label = { Text("Résolus · 7 jours") }) } }
         if (displayed.isEmpty()) item { Note(if (history) "Aucun événement résolu dans l’historique conservé." else "Aucun événement en cours. Vérifiez également l’état des chambres attendues.") }
+        if (!history && displayed.isNotEmpty()) item { Note("Prendre en charge coupe les rappels de cet événement. Une panne continue ne crée pas de nouvelle alerte après sa clôture ; son état reste affiché. Une connexion rétablie clôt automatiquement l’incident de coupure.") }
         items(displayed, key = { it.eventId }) { EventCard(it, action, it.eventId in pending) }
     }
 }
@@ -412,7 +441,7 @@ private suspend fun delayForPin() = kotlinx.coroutines.delay(1500)
     }
     LazyColumn(modifier, contentPadding = PaddingValues(24.dp), verticalArrangement = Arrangement.spacedBy(18.dp)) {
         item { Text("Réglages du poste", style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Bold); Text("Configuration et disponibilité", color = Quiet) }
-        item { Note("Version 2.0 · appairage sécurisé requis sur tous les téléphones. Aucun téléphone d’une ancienne version ne peut se connecter.") }
+        item { Note("Version 2.0.1 · appairage sécurisé requis sur tous les téléphones. Aucun téléphone d’une ancienne version ne peut se connecter.") }
         if (role == DeviceRole.ROOM_UNIT) {
             item { OutlinedTextField(name, { name = it.take(80) }, label = { Text("Repère de chambre — évitez le nom du résident") }, modifier = Modifier.fillMaxWidth()) }
             item { Text("Seuil relatif : ${threshold.toInt()}"); Slider(threshold, { threshold = it }, valueRange = 35f..85f); Text("Ce niveau n’est pas une mesure en dB SPL.", color = Quiet) }
