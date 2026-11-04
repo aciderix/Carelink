@@ -1,0 +1,6 @@
+{
+  "name": "CareLink",
+  "description": "Système de surveillance sonore multi-chambres pour personnes dépendantes sur réseau Wi-Fi local sans serveur avec alertes bruit et interphone.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
