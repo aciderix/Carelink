@@ -64,6 +64,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
     fun remoteThreshold(id: String, value: Int) = MonitorMonitoringService.sendRemoteThreshold(context, id, value)
     fun eventAction(event: RoomAlertEvent, resolve: Boolean) = MonitorMonitoringService.eventAction(context, event.eventId, resolve)
+    fun eventActions(events: List<RoomAlertEvent>, resolve: Boolean) = MonitorMonitoringService.eventActions(context, events.map { it.eventId }, resolve)
     fun listen(id: String) = MonitorMonitoringService.toggleListenAudio(context, id)
     fun speak(id: String) = MonitorMonitoringService.startTalkBack(context, id)
     fun stopSpeaking() = MonitorMonitoringService.stopTalkBack(context)

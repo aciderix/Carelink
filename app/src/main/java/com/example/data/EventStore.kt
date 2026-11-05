@@ -97,6 +97,20 @@ class EventStore(context: Context) : SQLiteOpenHelper(context.applicationContext
     @Synchronized fun request(id: String, room: String, action: String) {
         writableDatabase.execSQL("INSERT OR REPLACE INTO outbox VALUES(?,?,?)", arrayOf(id, room, action))
     }
+    /** Apply exactly the event IDs the operator saw, atomically within one service command. */
+    @Synchronized fun monitorActions(ids: List<String>, actor: String, resolve: Boolean) {
+        val db = writableDatabase
+        db.beginTransaction()
+        try {
+            for (id in ids.distinct()) {
+                val event = get("monitor", id) ?: continue
+                if (event.resolved) continue
+                if (event.remote) request(id, event.roomId, if (resolve) "RESOLVE" else "ACK")
+                else transition("monitor", id, actor, resolve)
+            }
+            db.setTransactionSuccessful()
+        } finally { db.endTransaction() }
+    }
     @Synchronized fun commands(room: String): List<Pair<String, String>> =
         readableDatabase.rawQuery("SELECT event,action FROM outbox WHERE room=?", arrayOf(room)).use {
             buildList { while (it.moveToNext()) add(it.getString(0) to it.getString(1)) }

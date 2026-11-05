@@ -19,7 +19,7 @@ class SurveillanceUiTest {
         compose.onNodeWithText("Poste veilleur").assertIsDisplayed()
         compose.onNodeWithText("Téléphone chambre").performScrollTo().assertIsDisplayed()
         compose.onAllNodesWithText("Utiliser ce mode")[0].performScrollTo().performClick()
-        compose.onNodeWithText("Votre veille").assertIsDisplayed()
+        compose.onNodeWithContentDescription("Captures récentes").assertIsDisplayed()
         compose.onNodeWithText("Ajouter une chambre").performScrollTo()
         compose.onNodeWithText("Ajouter une chambre").performClick()
         compose.onNodeWithText("Code professionnel").assertDoesNotExist()

@@ -6,6 +6,7 @@ import androidx.test.core.app.ApplicationProvider
 import com.example.data.EventStore
 import com.example.model.*
 import com.example.service.AlertManager
+import com.example.service.CareLinkNotificationHelper
 import org.junit.Assert.*
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -21,7 +22,7 @@ class AlertAcknowledgementTest {
         val notifications = context.getSystemService(NotificationManager::class.java)
         val event = RoomAlertEvent(roomId = "room", roomName = "Chambre", eventType = AlertEventType.SOUND_ALERT, remote = true)
         var manager = AlertManager(context, store)
-        fun visible() = notifications.activeNotifications.any { it.tag == event.eventId }
+        fun visible() = notifications.activeNotifications.any { it.tag == CareLinkNotificationHelper.groupTag(event.roomId, event.eventType) }
         try {
             manager.triggerAlert(event)
             assertTrue(visible())

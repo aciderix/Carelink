@@ -40,6 +40,14 @@ class MonitorMonitoringService : Service() {
         fun stopService(c: Context) { c.stopService(Intent(c, MonitorMonitoringService::class.java)) }
         fun refresh(c: Context) = command(c, ACTION_REFRESH)
         fun eventAction(c: Context, id: String, resolve: Boolean) = command(c, if (resolve) ACTION_RESOLVE else ACTION_ACKNOWLEDGE, id)
+        fun eventActions(c: Context, ids: List<String>, resolve: Boolean) {
+            // The snapshot excludes events arriving after the user's tap; bounded Binder payloads.
+            ids.distinct().chunked(256).forEach { batch ->
+                c.startService(Intent(c, MonitorMonitoringService::class.java)
+                    .setAction(if (resolve) ACTION_RESOLVE else ACTION_ACKNOWLEDGE)
+                    .putStringArrayListExtra("events", ArrayList(batch)))
+            }
+        }
         fun toggleListenAudio(c: Context, id: String) = command(c, ACTION_TOGGLE_LISTEN, id)
         fun startTalkBack(c: Context, id: String) = command(c, ACTION_START_TALK, id)
         fun stopTalkBack(c: Context) { if (_state.value.isRunning) command(c, ACTION_STOP_TALK) }
@@ -85,9 +93,10 @@ class MonitorMonitoringService : Service() {
                 when (intent?.action) {
                     ACTION_REFRESH -> refreshRooms()
                     ACTION_RECONNECT -> if (id != null) { client?.forget(id); refreshRooms() }
-                    ACTION_ACKNOWLEDGE, ACTION_RESOLVE -> if (id != null) {
-                        alerts?.transition(id, intent.action == ACTION_RESOLVE)
-                        _state.update { it.copy(diagnostic = "Action enregistrée. Une action distante reste visible jusqu’à confirmation de la chambre.") }
+                    ACTION_ACKNOWLEDGE, ACTION_RESOLVE -> {
+                        val snapshot = intent.getStringArrayListExtra("events")?.take(256) ?: listOfNotNull(id)
+                        alerts?.transitionMany(snapshot, intent.action == ACTION_RESOLVE)
+                        _state.update { it.copy(pendingActions = store.pendingCommandIds()) }
                     }
                     ACTION_TOGGLE_LISTEN -> if (id != null) {
                         if (_state.value.activeListeningRoomId == id) { client?.stopListeningToAudio(); _state.update { it.copy(activeListeningRoomId = null) } }
@@ -165,7 +174,7 @@ class MonitorMonitoringService : Service() {
                 network.checkDeadlines()
                 _state.update { it.copy(pendingActions = store.pendingCommandIds(), notificationWarnings = CareLinkNotificationHelper.readiness(this@MonitorMonitoringService)) }
                 val healthy = rooms.values.count { it.status in listOf(RoomStatus.CALM, RoomStatus.ACTIVITY, RoomStatus.ALERT) }
-                val pending = _state.value.activeAlerts.count { !it.isAcknowledged }
+                val pending = AlertGroup.active(_state.value.activeAlerts).count { !it.isAcknowledged }
                 (getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager).notify(1002,
                     CareLinkNotificationHelper.ongoing(this@MonitorMonitoringService, "CareLink · Veilleur", "$healthy/${rooms.size} captures récentes · $pending événement(s) à vérifier"))
                 delay(1000)

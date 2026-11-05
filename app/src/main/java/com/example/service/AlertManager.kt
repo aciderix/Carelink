@@ -15,9 +15,15 @@ class AlertManager(private val context: Context, private val store: EventStore =
     val history = _events.asStateFlow()
     private val _active = MutableStateFlow(_events.value.filterNot { it.resolved })
     val activeAlertsFlow = _active.asStateFlow()
+    private val notified = mutableSetOf<Pair<String, AlertEventType>>()
     init {
         CareLinkNotificationHelper.createNotificationChannels(context)
-        _active.value.filterNot { it.eventId in store.pendingCommandIds() }.forEach { CareLinkNotificationHelper.post(context, it) }
+        // Clear notifications left by the former one-notification-per-episode implementation.
+        _active.value.forEach { CareLinkNotificationHelper.cancel(context, it.eventId) }
+        _events.value.map { it.roomId to it.eventType }.distinct().forEach {
+            CareLinkNotificationHelper.cancelGroup(context, it.first, it.second)
+        }
+        refreshNotifications()
         scope.launch {
             var since = android.os.SystemClock.elapsedRealtime()
             while (isActive) {
@@ -25,45 +31,47 @@ class AlertManager(private val context: Context, private val store: EventStore =
                 val now = android.os.SystemClock.elapsedRealtime()
                 if (!prefs.isAlertRepeatEnabled) { since = now; continue }
                 if (now - since >= prefs.alertRepeatIntervalSeconds.coerceIn(10, 120) * 1000L) {
-                    val pending = store.pendingCommandIds()
-                    _active.value.filterNot { it.isAcknowledged || it.eventId in pending }.forEach { CareLinkNotificationHelper.post(context, it, true) }
+                    refreshNotifications(remind = true)
                     since = now
                 }
             }
         }
     }
     @Synchronized fun triggerAlert(event: RoomAlertEvent) {
+        val known = _events.value.any { it.eventId == event.eventId }
         val old = store.get("monitor", event.eventId)
         val fresh = store.put("monitor", event) // Receipt is permitted only after this returns.
         store.confirm(event)
         publish()
-        if (event.eventId !in store.pendingCommandIds() && (fresh || old?.isAcknowledged != event.isAcknowledged || old?.resolved != event.resolved))
-            CareLinkNotificationHelper.post(context, store.get("monitor", event.eventId)!!)
+        if (!known || fresh || old?.isAcknowledged != event.isAcknowledged || old?.resolved != event.resolved) refreshNotifications()
     }
     @Synchronized fun incident(room: RoomUnitState, kind: AlertEventType, message: String) {
         val event = store.incident(room, kind, message) ?: return
-        publish(); CareLinkNotificationHelper.post(context, event)
+        publish(); refreshNotifications()
     }
     @Synchronized fun recoverIncident(roomId: String, kind: AlertEventType) {
         val recovered = store.recoverIncident(roomId, kind)
         if (recovered.isNotEmpty()) {
-            recovered.forEach { CareLinkNotificationHelper.cancel(context, it.eventId) }
-            publish()
+            publish(); refreshNotifications()
         }
     }
-    @Synchronized fun transition(eventId: String, resolve: Boolean) {
-        val event = store.get("monitor", eventId) ?: return
-        if (event.remote) {
-            store.request(event.eventId, event.roomId, if (resolve) "RESOLVE" else "ACK")
-            CareLinkNotificationHelper.cancel(context, event.eventId)
-        } else {
-            val changed = store.transition("monitor", eventId, prefs.deviceLabel, resolve) ?: return
-            CareLinkNotificationHelper.post(context, changed); publish()
-        }
+    fun transition(eventId: String, resolve: Boolean) = transitionMany(listOf(eventId), resolve)
+    @Synchronized fun transitionMany(eventIds: List<String>, resolve: Boolean) {
+        store.monitorActions(eventIds, prefs.deviceLabel, resolve)
+        publish(); refreshNotifications()
+    }
+    @Synchronized private fun refreshNotifications(remind: Boolean = false) {
+        if (!scope.isActive) return
+        val pending = store.pendingCommandIds()
+        val groups = AlertGroup.active(_events.value)
+        val current = groups.map { it.roomId to it.eventType }.toSet()
+        (notified - current).forEach { CareLinkNotificationHelper.cancelGroup(context, it.first, it.second) }
+        groups.forEach { CareLinkNotificationHelper.postGroup(context, it, pending, remind) }
+        notified.clear(); notified.addAll(current)
     }
     fun publish() {
         _events.value = store.all("monitor")
         _active.value = _events.value.filterNot { it.resolved }
     }
-    fun release() { scope.cancel() }
+    @Synchronized fun release() { scope.cancel() }
 }

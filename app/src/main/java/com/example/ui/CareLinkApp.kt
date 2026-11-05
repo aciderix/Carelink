@@ -1,4 +1,4 @@
-@file:OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@file:OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class, androidx.compose.foundation.ExperimentalFoundationApi::class)
 package com.example.ui
 
 import android.content.ClipData
@@ -31,6 +31,10 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.core.graphics.drawable.toBitmap
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
@@ -164,7 +168,7 @@ fun CareLinkApp(vm: MainViewModel, startRole: (DeviceRole) -> Unit,
                 listOf("Surveillance" to Icons.Default.SpaceDashboard, "Événements" to Icons.Default.Notifications,
                     "Réglages" to Icons.Default.Tune).forEachIndexed { i, entry ->
                     NavigationBarItem(selected = tab == i, onClick = { if (i == 2) protect("Ouvrir les réglages professionnels ?") { tab = 2; detailId = null } else { tab = i; detailId = null } },
-                        icon = { if (i == 1 && monitor.activeAlerts.any { !it.isAcknowledged }) BadgedBox(badge = { Badge { Text(monitor.activeAlerts.count { !it.isAcknowledged }.toString()) } }) { Icon(entry.second, null) }
+                        icon = { if (i == 1) EventNavigationIcon(AlertGroup.active(monitor.activeAlerts).size)
                             else Icon(entry.second, null) }, label = { Text(entry.first) })
                 }
             }
@@ -193,15 +197,15 @@ fun CareLinkApp(vm: MainViewModel, startRole: (DeviceRole) -> Unit,
                 role == DeviceRole.ROOM_UNIT -> RoomHome(width, room, vm,
                     resume = { startRole(DeviceRole.ROOM_UNIT) },
                     pair = { protect("Appairer un poste veilleur ?") { vm.newPairing() } })
-                tab == 1 -> EventList(width, monitor.history, monitor.pendingActions, vm::eventAction)
+                tab == 1 -> EventList(width, monitor.history, monitor.pendingActions, vm::eventActions)
                 selected != null -> RoomDetail(width, selected, monitor, vm,
                     listen = { vm.listen(selected.id) }, talk = { talkId = selected.id },
                     threshold = { value -> protect("Appliquer un seuil relatif de $value ?") { vm.remoteThreshold(selected.id, value) } },
                     updateAddress = { address -> protect("Utiliser cette adresse réseau pour la chambre ?") { vm.updateAddress(selected.id, address) } },
                     pair = { protect("Reprendre l’appairage avec un nouveau QR ?") { addRoom = true } },
                     forget = { protect("Retirer cette chambre des appareils attendus ? Ses événements seront conservés.") { vm.forget(selected.id); detailId = null } })
-                else -> Dashboard(width, monitor, add = { protect("Appairer une nouvelle chambre ?") { addRoom = true } },
-                    select = { detailId = it }, events = { tab = 1 }, resume = { startRole(DeviceRole.MONITOR_UNIT) })
+                else -> MonitorDashboard(width, monitor, add = { protect("Appairer une nouvelle chambre ?") { addRoom = true } },
+                    select = { detailId = it }, eventAction = vm::eventActions, resume = { startRole(DeviceRole.MONITOR_UNIT) })
             }
         }
     }
@@ -302,53 +306,120 @@ private suspend fun delayForPin() = kotlinx.coroutines.delay(1500)
         }
     }
 }
-@Composable private fun Dashboard(modifier: Modifier, state: MonitorMonitoringService.MonitorServiceState, add: () -> Unit, select: (String) -> Unit, events: () -> Unit, resume: () -> Unit) {
+@Composable internal fun EventNavigationIcon(count: Int) {
+    if (count > 0) BadgedBox(badge = { Badge { Text(if (count > 99) "99+" else count.toString()) } }) {
+        Icon(Icons.Default.Notifications, "Événements en cours : $count")
+    } else Icon(Icons.Default.Notifications, null)
+}
+
+@Composable private fun TapInfo(label: String, explanation: String, content: @Composable (() -> Unit) -> Unit) {
+    val state = rememberTooltipState(isPersistent = true)
+    val scope = rememberCoroutineScope()
+    TooltipBox(positionProvider = TooltipDefaults.rememberPlainTooltipPositionProvider(),
+        tooltip = { PlainTooltip { Text(explanation) } }, state = state, enableUserInput = false) {
+        content { if (state.isVisible) state.dismiss() else scope.launch { state.show() } }
+    }
+}
+
+@Composable private fun CompactMetric(label: String, value: String, icon: ImageVector, color: Color, explanation: String) {
+    TapInfo(label, explanation) { show ->
+        Surface(onClick = show, color = Panel, shape = RoundedCornerShape(24.dp),
+            modifier = Modifier.heightIn(min = 44.dp).semantics { contentDescription = label }) {
+            Row(Modifier.padding(horizontal = 12.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Icon(icon, null, tint = color, modifier = Modifier.size(18.dp))
+                Text(value, color = color, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
+            }
+        }
+    }
+}
+
+@Composable internal fun MonitorDashboard(modifier: Modifier, state: MonitorMonitoringService.MonitorServiceState,
+    add: () -> Unit, select: (String) -> Unit, eventAction: (List<RoomAlertEvent>, Boolean) -> Unit, resume: () -> Unit) {
     val healthy = state.monitoredRooms.count { it.isMicOperational && it.status in listOf(RoomStatus.CALM, RoomStatus.ACTIVITY, RoomStatus.ALERT) }
-    LazyColumn(modifier, contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-        item { Text("Votre veille", style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Bold); Text("Chambres attendues · connexions sécurisées", color = Quiet) }
+    val groups = AlertGroup.active(state.activeAlerts)
+    val attention = groups.count { !it.isAcknowledged }
+    LazyColumn(modifier, contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                Metric("Captures récentes", "$healthy / ${state.monitoredRooms.size}", Mint, Modifier.weight(1f))
-                Metric("À vérifier", state.activeAlerts.count { !it.isAcknowledged }.toString(), Amber, Modifier.weight(1f))
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End)) {
+                CompactMetric("Captures récentes", "$healthy/${state.monitoredRooms.size}", Icons.Default.Sensors, Mint,
+                    "Captures récentes : $healthy sur ${state.monitoredRooms.size} chambres. Le microphone transmet des échantillons récents.")
+                CompactMetric("À vérifier", attention.toString(), Icons.Default.PriorityHigh, if (attention > 0) Rose else Quiet,
+                    "À vérifier : $attention alerte(s) en attente de prise en charge ou de confirmation. Les bruits répétés d’une chambre sont regroupés.")
             }
         }
         if (!state.isRunning) item { Note("Service arrêté. Reprenez la surveillance et vérifiez les autorisations.", true); Button(resume) { Text("Reprendre") } }
         if (state.notificationWarnings.isNotEmpty()) item { Note(state.notificationWarnings.joinToString("\n"), true) }
-        if (state.activeAlerts.isNotEmpty()) item {
-            Card(onClick = events, colors = CardDefaults.cardColors(containerColor = Color(0xFF442736)), shape = RoundedCornerShape(20.dp)) {
-                Row(Modifier.fillMaxWidth().padding(20.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Icon(Icons.Default.NotificationsActive, null, tint = Rose)
-                    Column(Modifier.weight(1f)) { Text("${state.activeAlerts.size} événement(s) en cours", fontWeight = FontWeight.Bold); Text("Consulter et prendre en charge", color = Quiet) }
-                    Icon(Icons.Default.ChevronRight, "Ouvrir les événements")
-                }
-            }
-        }
         if (state.monitoredRooms.isEmpty()) item { Note("Aucune chambre appairée. Ajoutez les téléphones attendus avant votre prise de poste.") }
-        items(state.monitoredRooms.sortedBy { when(it.status) { RoomStatus.DISCONNECTED, RoomStatus.MIC_ERROR -> 0; RoomStatus.ALERT -> 1; else -> 2 } }, key = { it.id }) { room ->
-            Card(onClick = { select(room.id) }, shape = RoundedCornerShape(22.dp), colors = CardDefaults.cardColors(containerColor = Panel)) {
-                Column(Modifier.fillMaxWidth().padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                        Text(room.name, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
-                        Icon(Icons.Default.ChevronRight, "Détails de la chambre")
-                    }
-                    Text(if (room.enrollmentPending) "Appairage à terminer" else room.status.label(), color = room.status.tint(), fontWeight = FontWeight.SemiBold)
-                    if (room.diagnostic.isNotBlank()) Text(room.diagnostic, color = Quiet, style = MaterialTheme.typography.bodyMedium)
-                    Row(horizontalArrangement = Arrangement.spacedBy(18.dp)) {
-                        Text(if (room.lastSeenTimestamp == 0L) "Aucune donnée validée" else "Dernière donnée : ${clock(room.lastSeenTimestamp)}", style = MaterialTheme.typography.labelMedium, color = Quiet)
-                    }
-                    if (room.batteryPercent >= 0) Text("Batterie ${room.batteryPercent}%${if (room.isCharging) " · en charge" else ""}", style = MaterialTheme.typography.labelMedium, color = Quiet)
-                }
+        items(state.monitoredRooms.sortedWith(compareBy<RoomUnitState> { room ->
+            when {
+                state.activeAlerts.any { it.roomId == room.id && !it.isAcknowledged } -> 0
+                room.status in listOf(RoomStatus.DISCONNECTED, RoomStatus.MIC_ERROR) -> 1
+                state.activeAlerts.any { it.roomId == room.id } -> 2
+                else -> 3
             }
+        }.thenBy { it.name }), key = { it.id }) { room ->
+            CompactRoomCard(room, state.activeAlerts.filter { it.roomId == room.id }, state.pendingActions,
+                open = { select(room.id) }, action = eventAction)
         }
-        item { OutlinedButton(add, Modifier.fillMaxWidth().heightIn(min = 52.dp)) { Icon(Icons.Default.Add, null); Spacer(Modifier.width(8.dp)); Text("Ajouter une chambre") } }
-        item { Note("Une capture récente ne garantit pas que le microphone est bien placé. Effectuez le test acoustique prévu à la prise de poste.") }
+        item { OutlinedButton(add, Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Icon(Icons.Default.Add, null); Spacer(Modifier.width(8.dp)); Text("Ajouter une chambre") } }
     }
 }
-@Composable private fun Metric(label: String, value: String, tint: Color, modifier: Modifier) {
-    Surface(modifier, color = Panel, shape = RoundedCornerShape(20.dp)) {
-        Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Text(value, style = MaterialTheme.typography.headlineMedium, color = tint, fontWeight = FontWeight.Bold)
-            Text(label, style = MaterialTheme.typography.labelMedium, color = Quiet)
+
+private fun roomInformation(room: RoomUnitState, events: List<RoomAlertEvent>): String = buildString {
+    appendLine(room.status.label())
+    if (room.diagnostic.isNotBlank()) appendLine(room.diagnostic)
+    appendLine("Dernière donnée : ${if (room.lastSeenTimestamp > 0) clock(room.lastSeenTimestamp) else "aucune"}")
+    appendLine("Batterie : ${if (room.batteryPercent >= 0) "${room.batteryPercent}%" else "inconnue"}${if (room.isCharging) " · en charge" else ""}")
+    room.temperatureC?.let { appendLine("Température : ${"%.1f".format(Locale.FRANCE, it)} °C") }
+    appendLine("Niveau relatif : ${room.currentDecibels} · seuil ${room.noiseThresholdDb}")
+    appendLine("Adresse : ${room.ipAddress}")
+    if (events.isNotEmpty()) append("${events.size} occurrence(s) en cours · dernière ${clock(events.maxOf { it.timestamp })}")
+}.trim()
+
+@Composable internal fun CompactRoomCard(room: RoomUnitState, events: List<RoomAlertEvent>, pending: Set<String>,
+    open: () -> Unit, action: (List<RoomAlertEvent>, Boolean) -> Unit) {
+    val unresolved = events.filterNot { it.resolved }
+    val unchecked = unresolved.filterNot { it.isAcknowledged }
+    val targets = if (unchecked.isNotEmpty()) unchecked else unresolved
+    val waiting = targets.isNotEmpty() && targets.all { it.eventId in pending }
+    val technical = room.status in listOf(RoomStatus.DISCONNECTED, RoomStatus.MIC_ERROR)
+    val alarm = technical || unchecked.any { it.eventId !in pending } || (room.status == RoomStatus.ALERT && unresolved.isEmpty())
+    val color = if (alarm) Rose else if (unresolved.isNotEmpty() || room.enrollmentPending) Amber else room.status.tint()
+    val status = when {
+        room.enrollmentPending -> "Appairage à terminer"
+        room.status == RoomStatus.DISCONNECTED -> "Hors ligne"
+        room.status == RoomStatus.MIC_ERROR -> "Microphone indisponible"
+        waiting -> "Confirmation en attente"
+        unchecked.isNotEmpty() -> "À vérifier"
+        unresolved.isNotEmpty() -> "Pris en charge"
+        room.status == RoomStatus.CALM -> "Calme"
+        room.status == RoomStatus.ACTIVITY -> "Activité sonore"
+        room.status == RoomStatus.ALERT -> "Seuil dépassé"
+        room.status == RoomStatus.DEGRADED -> "Mode dégradé"
+        else -> "Vérification en cours"
+    }
+    val tooltip = rememberTooltipState(isPersistent = true)
+    val scope = rememberCoroutineScope()
+    TooltipBox(positionProvider = TooltipDefaults.rememberPlainTooltipPositionProvider(),
+        tooltip = { PlainTooltip { Text(roomInformation(room, unresolved)) } }, state = tooltip, enableUserInput = false) {
+        Card(Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp)).combinedClickable(role = Role.Button,
+            onClickLabel = "Ouvrir ${room.name}", onClick = open, onLongClickLabel = "Informations de ${room.name}",
+            onLongClick = { scope.launch { tooltip.show() } }), shape = RoundedCornerShape(20.dp),
+            border = BorderStroke(1.dp, color.copy(alpha = 0.3f)),
+            colors = CardDefaults.cardColors(containerColor = if (alarm) Color(0xFF3B2635) else if (unresolved.isNotEmpty()) Color(0xFF332E26) else Panel)) {
+            Row(Modifier.fillMaxWidth().padding(start = 18.dp, end = 10.dp, top = 14.dp, bottom = 14.dp),
+                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                    Text(room.name, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(status, color = color, style = MaterialTheme.typography.bodyMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                }
+                if (targets.isNotEmpty()) IconButton(onClick = { action(targets.filterNot { it.eventId in pending }, unchecked.isEmpty()) },
+                    enabled = !waiting, modifier = Modifier.size(48.dp)) {
+                    Icon(if (waiting) Icons.Default.HourglassTop else if (unchecked.isNotEmpty()) Icons.Default.TaskAlt else Icons.Default.DoneAll,
+                        if (waiting) "Confirmation en attente pour ${room.name}" else if (unchecked.isNotEmpty()) "Prendre en charge ${room.name}" else "Résoudre les alertes de ${room.name}", tint = color)
+                }
+            }
         }
     }
 }
@@ -356,7 +427,12 @@ private suspend fun delayForPin() = kotlinx.coroutines.delay(1500)
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             Text(if (enabled) level.toString() else "—", style = MaterialTheme.typography.displaySmall, fontWeight = FontWeight.Bold)
-            Column(horizontalAlignment = Alignment.End) { Text("Niveau relatif", fontWeight = FontWeight.Medium); Text("Seuil $threshold · non calibré", color = Quiet, style = MaterialTheme.typography.labelMedium) }
+            Column(horizontalAlignment = Alignment.End) {
+                TapInfo("Niveau relatif", "Le niveau dépend du microphone et de son placement. CareLink n’effectue pas d’étalonnage en dB SPL. Réglez le seuil dans les réglages de la chambre après un essai sonore représentatif.") { show ->
+                    TextButton(show) { Text("Niveau relatif"); Spacer(Modifier.width(6.dp)); Icon(Icons.Default.Info, "Informations sur le niveau sonore", Modifier.size(16.dp)) }
+                }
+                Text("Seuil $threshold", color = Quiet, style = MaterialTheme.typography.labelMedium)
+            }
         }
         LinearProgressIndicator(progress = { if (enabled) level.coerceIn(0, 91) / 91f else 0f }, modifier = Modifier.fillMaxWidth().height(10.dp).clip(RoundedCornerShape(5.dp)), color = if (level >= threshold) Rose else Mint, trackColor = Color(0xFF2D4059))
     }
@@ -411,19 +487,49 @@ private suspend fun delayForPin() = kotlinx.coroutines.delay(1500)
             Slider(value, { value = it }, valueRange = 35f..85f)
             OutlinedButton(onClick = { threshold(value.toInt()) }, enabled = room.status != RoomStatus.DISCONNECTED) { Text("Appliquer le réglage") }
         }
-        items(state.activeAlerts.filter { it.roomId == room.id }, key = { it.eventId }) { EventCard(it, vm::eventAction, it.eventId in state.pendingActions) }
+        items(AlertGroup.active(state.activeAlerts.filter { it.roomId == room.id }), key = { it.key }) { GroupedEventCard(it, state.pendingActions, vm::eventActions) }
         item { TextButton(forget) { Text("Retirer des chambres attendues", color = Rose) } }
     }
 }
-@Composable private fun EventList(modifier: Modifier, events: List<RoomAlertEvent>, pending: Set<String>, action: (RoomAlertEvent, Boolean) -> Unit) {
+@Composable private fun EventList(modifier: Modifier, events: List<RoomAlertEvent>, pending: Set<String>, action: (List<RoomAlertEvent>, Boolean) -> Unit) {
     var history by remember { mutableStateOf(false) }
-    val displayed = events.filter { if (history) it.resolved else !it.resolved }.sortedWith(compareBy<RoomAlertEvent> { it.isAcknowledged }.thenByDescending { it.timestamp })
+    val groups = AlertGroup.active(events)
+    val resolved = events.filter { it.resolved }.sortedByDescending { it.timestamp }
     LazyColumn(modifier, contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-        item { Text("Événements", style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Bold); Text("Chaque événement conserve son identité et son heure.", color = Quiet) }
+        item { Text("Événements", style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Bold) }
         item { Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) { FilterChip(!history, { history = false }, label = { Text("En cours") }); FilterChip(history, { history = true }, label = { Text("Résolus · 7 jours") }) } }
-        if (displayed.isEmpty()) item { Note(if (history) "Aucun événement résolu dans l’historique conservé." else "Aucun événement en cours. Vérifiez également l’état des chambres attendues.") }
-        if (!history && displayed.isNotEmpty()) item { Note("Prendre en charge coupe les rappels de cet événement. Une panne continue ne crée pas de nouvelle alerte après sa clôture ; son état reste affiché. Une connexion rétablie clôt automatiquement l’incident de coupure.") }
-        items(displayed, key = { it.eventId }) { EventCard(it, action, it.eventId in pending) }
+        if (history) {
+            if (resolved.isEmpty()) item { Note("Aucun événement résolu dans l’historique conservé.") }
+            items(resolved, key = { it.eventId }) { EventCard(it, { event, resolve -> action(listOf(event), resolve) }, it.eventId in pending) }
+        } else {
+            if (groups.isEmpty()) item { Note("Aucune alerte en cours.") }
+            items(groups, key = { it.key }) { GroupedEventCard(it, pending, action) }
+        }
+    }
+}
+
+@Composable private fun GroupedEventCard(group: AlertGroup, pending: Set<String>, action: (List<RoomAlertEvent>, Boolean) -> Unit) {
+    var resolving by remember { mutableStateOf<List<RoomAlertEvent>?>(null) }
+    val unchecked = group.events.filterNot { it.isAcknowledged }
+    val targets = if (unchecked.isNotEmpty()) unchecked else group.events
+    val waiting = targets.all { it.eventId in pending }
+    Card(shape = RoundedCornerShape(22.dp), colors = CardDefaults.cardColors(containerColor = if (group.isAcknowledged) Panel else Color(0xFF3B2635))) {
+        Column(Modifier.fillMaxWidth().padding(20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text(group.roomName, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+            Text(group.eventType.label(), color = if (group.isAcknowledged) Mint else Amber)
+            Text(if (group.occurrences > 1) "${group.occurrences} occurrences · dernière ${clock(group.lastTimestamp)}" else clock(group.lastTimestamp), color = Quiet, style = MaterialTheme.typography.bodySmall)
+            if (group.isAcknowledged) Text("Pris en charge", color = Mint)
+            Button(onClick = { if (unchecked.isNotEmpty()) action(targets.filterNot { it.eventId in pending }, false) else resolving = group.events.toList() },
+                enabled = !waiting, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) {
+                Text(if (waiting) "Confirmation en attente…" else if (unchecked.isNotEmpty()) "Prendre en charge" else "Marquer comme résolu")
+            }
+        }
+    }
+    resolving?.let { snapshot ->
+        AlertDialog(onDismissRequest = { resolving = null }, title = { Text("Résoudre cette alerte ?") },
+            text = { Text("Clôturer les ${snapshot.size} occurrence(s) de cette alerte ?") },
+            confirmButton = { TextButton(onClick = { resolving = null; action(snapshot, true) }) { Text("Confirmer la résolution") } },
+            dismissButton = { TextButton(onClick = { resolving = null }) { Text("Annuler") } })
     }
 }
 @Composable private fun EventCard(event: RoomAlertEvent, action: (RoomAlertEvent, Boolean) -> Unit, pending: Boolean = false) {

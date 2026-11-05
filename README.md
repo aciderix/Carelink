@@ -4,9 +4,9 @@ Application Android de détection sonore et de communication sur réseau local, 
 
 ## Télécharger la version d’essai
 
-L’APK d’essai est inclus dans cette branche : **[CareLink 2.0.3-debug — télécharger](https://github.com/aciderix/Carelink/raw/refs/heads/carelink-v2-ameliorations-apk/downloads/CareLink-2.0.3-debug.apk)**. Depuis GitHub, ouvrir le fichier puis utiliser **Download raw file** si nécessaire. Le bouton **Code → Download ZIP** récupère aussi les sources et l’APK.
+L’APK d’essai est inclus dans cette branche : **[CareLink 2.1.0-debug — télécharger](https://github.com/aciderix/Carelink/raw/refs/heads/carelink-v2-ameliorations-apk/downloads/CareLink-2.1.0-debug.apk)**. Depuis GitHub, ouvrir le fichier puis utiliser **Download raw file** si nécessaire. Le bouton **Code → Download ZIP** récupère aussi les sources et l’APK.
 
-- [Dossier de téléchargement](downloads/) et [empreinte SHA-256](downloads/CareLink-2.0.3-debug.apk.sha256).
+- [Dossier de téléchargement](downloads/) et [empreinte SHA-256](downloads/CareLink-2.1.0-debug.apk.sha256).
 - [Résultats de validation](docs/RESULTATS_VALIDATION.md) et [consignes de qualification](docs/VALIDATION.md).
 - [Aperçu de l’accueil](docs/screenshots/welcome.png) et [tableau de surveillance](docs/screenshots/monitor-empty.png).
 
@@ -22,6 +22,17 @@ Il s’agit d’une version d’essai distincte de l’application de production
 - Contrôles de fraîcheur, capture rendue silencieuse, silence numérique prolongé, erreurs et saturation. Le test de transmission ne prétend pas vérifier le microphone.
 - Interface sombre, navigation Surveillance / Événements / Réglages, protection optionnelle des actions sensibles par code et notifications sans acquittement accidentel depuis l’écran verrouillé.
 - Pas de SDK Firebase, pas de service cloud applicatif et pas d’enregistrement audio conservé.
+
+## Surveillance dans la version 2.1.0
+
+- Deux indicateurs compacts affichent les captures récentes et les alertes à vérifier. Toucher un indicateur affiche son explication.
+- Une carte de chambre montre son titre et son état. Un appui long affiche le diagnostic, la batterie, la dernière donnée et le niveau relatif.
+- Le bouton de la carte prend en charge les événements affichés de cette chambre, puis permet de les résoudre. Une action distante reste en attente de confirmation si la connexion est coupée.
+- L’icône **Événements** porte le nombre de groupes en cours, y compris ceux pris en charge. Les épisodes d’un même type et d’une même chambre occupent un seul groupe et une seule notification. Le compteur d’occurrences apparaît dans les événements ; le journal conserve chaque épisode et son heure.
+- Un nouveau bruit après prise en charge remet ce groupe à vérifier. Tant qu’un groupe est déjà à vérifier, ses nouvelles occurrences mettent à jour sa notification ; les rappels suivent le réglage du poste. Les actions portent sur les identifiants affichés au moment du clic : un épisode reçu ensuite reste à traiter.
+- Le niveau sonore est relatif au microphone. Le seuil se règle dans la chambre ; l’aide au toucher explique ce réglage. Aucun étalonnage physique en dB SPL n’est proposé.
+
+L’avertissement sur le mode Ne pas déranger est retiré de l’interface. La diffusion des notifications reste régie par les réglages Android.
 
 ## Interface et code dans la version 2.0.2
 
@@ -51,7 +62,7 @@ Les autres téléphones du LAN ne sont pas ajoutés automatiquement. La révocat
 - **À vérifier** : événement conservé, non pris en charge ; rappels selon les réglages.
 - **Pris en charge** : transition durable confirmée, événement encore visible.
 - **Résolu** : clôture humaine, ou retour technique confirmé pour un incident local, conservée sept jours après sa résolution avant nettoyage. Un événement non résolu n’est jamais supprimé par la rétention.
-- Les événements sonores et de test proviennent de la chambre. Les incidents de connexion/batterie/capture observés par un veilleur sont locaux à ce poste ; leur résolution ne répare pas l’état technique.
+- Les événements sonores et de test proviennent de la chambre. Leur regroupement à l’écran conserve leurs identifiants et leurs états individuels. Les incidents de connexion/batterie/capture observés par un veilleur sont locaux à ce poste ; leur résolution ne répare pas l’état technique.
 - Les prises en charge des événements distants sont partagées avec les veilleurs appairés via la chambre. Pendant une coupure, elles restent dans la file locale et sont confirmées à la reconnexion.
 
 Une panne du téléphone chambre empêche la coordination distante jusqu’à sa reprise. Un téléphone veilleur arrêté ne peut pas signaler lui-même son arrêt : prévoir un relais humain ou un autre poste.

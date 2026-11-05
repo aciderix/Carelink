@@ -52,7 +52,7 @@ class InterfaceTest {
             }
         }
         compose.onAllNodesWithText("Utiliser ce mode")[0].performClick()
-        compose.onNodeWithText("Votre veille").assertIsDisplayed()
+        compose.onNodeWithContentDescription("Captures récentes").assertIsDisplayed()
         compose.onNodeWithText("Aucune chambre appairée. Ajoutez les téléphones attendus avant votre prise de poste.").performScrollTo().assertIsDisplayed()
         screenshot("monitor-empty")
         compose.onNodeWithText("Ajouter une chambre").performScrollTo().assertIsDisplayed()

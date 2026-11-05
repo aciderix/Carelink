@@ -11,7 +11,7 @@ import androidx.core.app.NotificationManagerCompat
 import com.example.MainActivity
 import com.example.R
 import com.example.data.PreferencesManager
-import com.example.model.RoomAlertEvent
+import com.example.model.*
 
 object CareLinkNotificationHelper {
     const val ONGOING = "carelink_status_v2"
@@ -39,19 +39,31 @@ object CareLinkNotificationHelper {
         .setSmallIcon(R.drawable.ic_stat_carelink).setContentTitle(title).setContentText(body)
         .setOngoing(true).setOnlyAlertOnce(true).setContentIntent(launch(context))
         .setVisibility(NotificationCompat.VISIBILITY_PRIVATE).setCategory(NotificationCompat.CATEGORY_SERVICE).build()
-    fun post(context: Context, event: RoomAlertEvent, remind: Boolean = false) {
-        if (event.resolved || event.isAcknowledged) { cancel(context, event.eventId); return }
+    fun groupTag(roomId: String, kind: AlertEventType) = "carelink:$roomId:${kind.name}"
+    fun cancelGroup(context: Context, roomId: String, kind: AlertEventType) =
+        (context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager).cancel(groupTag(roomId, kind), 2000)
+    fun postGroup(context: Context, group: AlertGroup, pending: Set<String> = emptySet(), remind: Boolean = false) {
+        if (!group.needsAttention(pending)) { cancelGroup(context, group.roomId, group.eventType); return }
         val prefs = PreferencesManager(context)
-        val title = if (event.isAcknowledged) "Prise en charge · ${event.roomName}" else "À vérifier · ${event.roomName}"
+        val title = "À vérifier · ${group.roomName}"
+        val kind = when (group.eventType) {
+            AlertEventType.SOUND_ALERT -> "Bruit détecté"
+            AlertEventType.DISCONNECTION -> "Connexion interrompue"
+            AlertEventType.MIC_ERROR -> "Incident microphone"
+            AlertEventType.LOW_BATTERY -> "Batterie faible"
+            AlertEventType.SERVICE_INTERRUPTED -> "Incident technique"
+            AlertEventType.TEST -> "Test de transmission"
+        }
+        val body = kind + if (group.occurrences > 1) " · ${group.occurrences} occurrences" else ""
         val n = NotificationCompat.Builder(context, ALERTS).setSmallIcon(R.drawable.ic_stat_carelink)
-            .setContentTitle(title).setContentText(event.notes.ifBlank { event.eventType.name })
-            .setContentIntent(launch(context, event.roomId)).setAutoCancel(false).setOngoing(!event.isAcknowledged)
-            .setOnlyAlertOnce(!remind).setSilent(event.isAcknowledged || !prefs.isSoundAlertEnabled)
+            .setContentTitle(title).setContentText(body)
+            .setContentIntent(launch(context, group.roomId)).setAutoCancel(false).setOngoing(true)
+            .setOnlyAlertOnce(!remind).setSilent(!prefs.isSoundAlertEnabled)
             .setPriority(NotificationCompat.PRIORITY_HIGH).setCategory(NotificationCompat.CATEGORY_ALARM)
             .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
         if (Build.VERSION.SDK_INT < 26) n.setVibrate(if (prefs.isVibrationAlertEnabled) longArrayOf(0, 350, 200, 350) else longArrayOf(0))
         // Human transitions require the app, preventing accidental lock-screen acknowledgements.
-        runCatching { (context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager).notify(event.eventId, 2000, n.build()) }
+        runCatching { (context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager).notify(groupTag(group.roomId, group.eventType), 2000, n.build()) }
     }
     fun cancel(context: Context, id: String) = (context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager).cancel(id, 2000)
     fun readiness(context: Context): List<String> {
@@ -66,7 +78,6 @@ object CareLinkNotificationHelper {
             }
             val audio = context.getSystemService(Context.AUDIO_SERVICE) as android.media.AudioManager
             if (audio.getStreamVolume(android.media.AudioManager.STREAM_ALARM) == 0) add("Volume des alarmes nul")
-            if (nm.currentInterruptionFilter != NotificationManager.INTERRUPTION_FILTER_ALL) add("Ne pas déranger actif : vérifier l’audibilité")
             if (!PreferencesManager(context).isSoundAlertEnabled) add("Son désactivé dans CareLink")
         }
     }
