@@ -14,6 +14,10 @@ import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items as gridItems
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -30,6 +34,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.testTag
 import androidx.core.graphics.drawable.toBitmap
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -148,42 +153,21 @@ fun CareLinkApp(vm: MainViewModel, startRole: (DeviceRole) -> Unit,
     BackHandler(detailId != null) { detailId = null }
     BackHandler(addRoom) { addRoom = false; scan = false }
     LaunchedEffect(tab) { if (tab == 2) vm.reloadPeers() }
-    Scaffold(
-        containerColor = MaterialTheme.colorScheme.background,
-        snackbarHost = { SnackbarHost(snackbar) },
-        topBar = {
-            CenterAlignedTopAppBar(title = {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(9.dp)) {
-                    CareLinkIcon()
-                    Text("CareLink", fontWeight = FontWeight.Bold)
-                }
-            }, navigationIcon = {
-                if (addRoom || detailId != null) IconButton(onClick = { if (addRoom) { addRoom = false; scan = false } else detailId = null }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Retour") }
-            }, actions = {
-                if (role != DeviceRole.NONE && !addRoom) IconButton(onClick = { protect("Ouvrir les réglages professionnels ?") { tab = 2; detailId = null } }) { Icon(Icons.Default.Tune, "Réglages et diagnostic") }
-            })
-        },
-        bottomBar = {
-            if (role != DeviceRole.NONE && !addRoom) NavigationBar(containerColor = Panel) {
-                listOf("Surveillance" to Icons.Default.SpaceDashboard, "Événements" to Icons.Default.Notifications,
-                    "Réglages" to Icons.Default.Tune).forEachIndexed { i, entry ->
-                    NavigationBarItem(selected = tab == i, onClick = { if (i == 2) protect("Ouvrir les réglages professionnels ?") { tab = 2; detailId = null } else { tab = i; detailId = null } },
-                        icon = { if (i == 1) EventNavigationIcon(AlertGroup.active(monitor.activeAlerts).size)
-                            else Icon(entry.second, null) }, label = { Text(entry.first) })
-                }
-            }
-        }
-    ) { padding ->
-        Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.TopCenter) {
-            val width = Modifier.widthIn(max = 900.dp).fillMaxWidth()
+    CareLinkScaffold(role, monitor, tab, role != DeviceRole.NONE && !addRoom,
+        back = if (addRoom || detailId != null) ({ if (addRoom) { addRoom = false; scan = false } else detailId = null }) else null,
+        settings = if (role != DeviceRole.NONE && !addRoom) ({ protect("Ouvrir les réglages professionnels ?") { tab = 2; detailId = null } }) else null,
+        navigate = { next -> if (next == 2) protect("Ouvrir les réglages professionnels ?") { tab = 2; detailId = null } else { tab = next; detailId = null } },
+        snackbar = snackbar) { body ->
+            val width = body.widthIn(max = 1280.dp).fillMaxSize()
+            val form = body.widthIn(max = 720.dp).fillMaxSize()
             when {
-                role == DeviceRole.NONE -> Welcome(width, startRole)
-                addRoom -> AddRoomScreen(width, monitor, scan,
+                role == DeviceRole.NONE -> Welcome(body.widthIn(max = 1000.dp).fillMaxSize(), startRole)
+                addRoom -> AddRoomScreen(form, monitor, scan,
                     startScan = { requestCamera { if (addRoom) scan = true } },
                     submit = { vm.importPairing(it); scan = false; addRoom = false },
                     error = { vm.message.value = it; scan = false },
                     cancel = { addRoom = false; scan = false })
-                tab == 2 -> SettingsPanel(width, vm, role, codeProtectionEnabled, monitor.notificationWarnings, peers,
+                tab == 2 -> SettingsPanel(form, vm, role, codeProtectionEnabled, monitor.notificationWarnings, peers,
                     stop = { protect("Arrêter la surveillance sur ce téléphone ?") { vm.stop(); tab = 0 } },
                     enableLock = {
                         protectedAction = { vm.setCodeProtection(true); vm.message.value = "Protection par code activée" }
@@ -194,12 +178,14 @@ fun CareLinkApp(vm: MainViewModel, startRole: (DeviceRole) -> Unit,
                     test = { protect("Envoyer un événement de test ?") { vm.test() } },
                     pair = { protect("Ouvrir un appairage à usage unique pendant deux minutes ?") { vm.newPairing() } },
                     revoke = { id -> protect("Révoquer l’accès de ce veilleur ?") { vm.revoke(id) } })
-                role == DeviceRole.ROOM_UNIT -> RoomHome(width, room, vm,
+                role == DeviceRole.ROOM_UNIT -> RoomHomePanel(width, room, vm.prefs.roomName,
                     resume = { startRole(DeviceRole.ROOM_UNIT) },
+                    settings = { protect("Ouvrir les réglages professionnels ?") { tab = 2 } },
                     pair = { protect("Appairer un poste veilleur ?") { vm.newPairing() } })
                 tab == 1 -> EventList(width, monitor.history, monitor.pendingActions, vm::eventActions)
-                selected != null -> RoomDetail(width, selected, monitor, vm,
+                selected != null -> RoomDetailPanel(width, selected, monitor,
                     listen = { vm.listen(selected.id) }, talk = { talkId = selected.id },
+                    reconnect = { vm.reconnect(selected.id) }, eventAction = vm::eventActions,
                     threshold = { value -> protect("Appliquer un seuil relatif de $value ?") { vm.remoteThreshold(selected.id, value) } },
                     updateAddress = { address -> protect("Utiliser cette adresse réseau pour la chambre ?") { vm.updateAddress(selected.id, address) } },
                     pair = { protect("Reprendre l’appairage avec un nouveau QR ?") { addRoom = true } },
@@ -207,7 +193,6 @@ fun CareLinkApp(vm: MainViewModel, startRole: (DeviceRole) -> Unit,
                 else -> MonitorDashboard(width, monitor, add = { protect("Appairer une nouvelle chambre ?") { addRoom = true } },
                     select = { detailId = it }, eventAction = vm::eventActions, resume = { startRole(DeviceRole.MONITOR_UNIT) })
             }
-        }
     }
     if (confirmLabel != null && !pinDialog) AlertDialog(onDismissRequest = { confirmLabel = null; protectedAction = null },
         icon = { Icon(Icons.Default.Shield, null, tint = Amber) }, title = { Text("Action professionnelle") },
@@ -246,6 +231,58 @@ fun CareLinkApp(vm: MainViewModel, startRole: (DeviceRole) -> Unit,
     }
 }
 
+@Composable internal fun CareLinkScaffold(role: DeviceRole, monitor: MonitorMonitoringService.MonitorServiceState,
+    tab: Int, showNavigation: Boolean, back: (() -> Unit)? = null, settings: (() -> Unit)? = null,
+    navigate: (Int) -> Unit, snackbar: SnackbarHostState = remember { SnackbarHostState() },
+    content: @Composable (Modifier) -> Unit) {
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        val rail = maxWidth >= 840.dp || (maxWidth >= 600.dp && maxHeight < 480.dp)
+        val destinations = if (role == DeviceRole.MONITOR_UNIT) listOf(0, 1, 2) else listOf(0, 2)
+        val labels = listOf("Surveillance", "Événements", "Réglages")
+        val icons = listOf(Icons.Default.SpaceDashboard, Icons.Default.Notifications, Icons.Default.Tune)
+        val count = AlertGroup.active(monitor.activeAlerts).size
+        val healthy = monitor.monitoredRooms.count { it.isMicOperational && it.status in listOf(RoomStatus.CALM, RoomStatus.ACTIVITY, RoomStatus.ALERT) }
+        val unchecked = AlertGroup.active(monitor.activeAlerts).count { !it.isAcknowledged }
+        Scaffold(containerColor = MaterialTheme.colorScheme.background,
+            snackbarHost = { SnackbarHost(snackbar) }, topBar = {
+                Surface(color = MaterialTheme.colorScheme.background) {
+                    Row(Modifier.fillMaxWidth().statusBarsPadding().heightIn(min = 64.dp).padding(horizontal = 8.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        if (back != null) IconButton(back) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Retour") }
+                        if (role == DeviceRole.MONITOR_UNIT && showNavigation) {
+                            CompactMetric("Captures récentes", "$healthy/${monitor.monitoredRooms.size}", Icons.Default.Sensors, Mint,
+                                "Captures récentes : $healthy sur ${monitor.monitoredRooms.size} chambres. Le microphone transmet des échantillons récents.")
+                            CompactMetric("À vérifier", unchecked.toString(), Icons.Default.PriorityHigh, if (unchecked > 0) Rose else Quiet,
+                                "À vérifier : $unchecked alerte(s) en attente de prise en charge. Touchez une chambre ou ouvrez les événements.")
+                        }
+                        Row(Modifier.weight(1f).testTag("header_title"), verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            CareLinkIcon()
+                            Text("CareLink", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold,
+                                maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
+                        if (settings != null) IconButton(settings) { Icon(Icons.Default.Settings, "Réglages et diagnostic") }
+                    }
+                }
+            }, bottomBar = {
+                if (showNavigation && !rail) NavigationBar(Modifier.testTag("navigation_bar"), containerColor = Panel) {
+                    destinations.forEach { index -> NavigationBarItem(selected = tab == index, onClick = { navigate(index) },
+                        icon = { if (index == 1) EventNavigationIcon(count) else Icon(icons[index], null) }, label = { Text(labels[index]) }) }
+                }
+            }) { padding ->
+            Row(Modifier.fillMaxSize().padding(padding)) {
+                if (showNavigation && rail) {
+                    NavigationRail(Modifier.fillMaxHeight().testTag("navigation_rail"), containerColor = Panel, windowInsets = WindowInsets(0, 0, 0, 0)) {
+                        destinations.forEach { index -> NavigationRailItem(selected = tab == index, onClick = { navigate(index) },
+                            icon = { if (index == 1) EventNavigationIcon(count) else Icon(icons[index], null) }, label = { Text(labels[index]) }) }
+                    }
+                }
+                Box(Modifier.weight(1f).fillMaxHeight(), contentAlignment = Alignment.TopCenter) { content(Modifier) }
+            }
+        }
+    }
+}
+
 @Composable private fun AddRoomScreen(modifier: Modifier, state: MonitorMonitoringService.MonitorServiceState,
     scan: Boolean, startScan: () -> Unit, submit: (String) -> Unit, error: (String) -> Unit, cancel: () -> Unit) {
     var input by remember { mutableStateOf("") }
@@ -270,13 +307,13 @@ fun CareLinkApp(vm: MainViewModel, startRole: (DeviceRole) -> Unit,
     }
 }
 
-@Composable private fun CareLinkIcon() {
+@Composable private fun CareLinkIcon(dimension: androidx.compose.ui.unit.Dp = 28.dp) {
     val context = LocalContext.current
-    val size = with(LocalDensity.current) { 36.dp.roundToPx() }
+    val size = with(LocalDensity.current) { dimension.roundToPx() }
     val icon = remember(context, size) {
         context.applicationInfo.loadIcon(context.packageManager).toBitmap(size, size).asImageBitmap()
     }
-    Image(icon, contentDescription = null, modifier = Modifier.size(36.dp).clip(RoundedCornerShape(10.dp)))
+    Image(icon, contentDescription = null, modifier = Modifier.size(dimension).clip(RoundedCornerShape(8.dp)))
 }
 
 private suspend fun delayForPin() = kotlinx.coroutines.delay(1500)
@@ -323,12 +360,12 @@ private suspend fun delayForPin() = kotlinx.coroutines.delay(1500)
 
 @Composable private fun CompactMetric(label: String, value: String, icon: ImageVector, color: Color, explanation: String) {
     TapInfo(label, explanation) { show ->
-        Surface(onClick = show, color = Panel, shape = RoundedCornerShape(24.dp),
-            modifier = Modifier.heightIn(min = 44.dp).semantics { contentDescription = label }) {
-            Row(Modifier.padding(horizontal = 12.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Icon(icon, null, tint = color, modifier = Modifier.size(18.dp))
-                Text(value, color = color, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
+        Surface(onClick = show, color = Panel, shape = RoundedCornerShape(14.dp),
+            modifier = Modifier.widthIn(min = 44.dp).heightIn(min = 48.dp).semantics { contentDescription = label }) {
+            Column(Modifier.padding(horizontal = 5.dp, vertical = 5.dp), horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Icon(icon, null, tint = color, modifier = Modifier.size(16.dp))
+                Text(value, color = color, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, maxLines = 1)
             }
         }
     }
@@ -336,22 +373,18 @@ private suspend fun delayForPin() = kotlinx.coroutines.delay(1500)
 
 @Composable internal fun MonitorDashboard(modifier: Modifier, state: MonitorMonitoringService.MonitorServiceState,
     add: () -> Unit, select: (String) -> Unit, eventAction: (List<RoomAlertEvent>, Boolean) -> Unit, resume: () -> Unit) {
-    val healthy = state.monitoredRooms.count { it.isMicOperational && it.status in listOf(RoomStatus.CALM, RoomStatus.ACTIVITY, RoomStatus.ALERT) }
-    val groups = AlertGroup.active(state.activeAlerts)
-    val attention = groups.count { !it.isAcknowledged }
-    LazyColumn(modifier, contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        item {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End)) {
-                CompactMetric("Captures récentes", "$healthy/${state.monitoredRooms.size}", Icons.Default.Sensors, Mint,
-                    "Captures récentes : $healthy sur ${state.monitoredRooms.size} chambres. Le microphone transmet des échantillons récents.")
-                CompactMetric("À vérifier", attention.toString(), Icons.Default.PriorityHigh, if (attention > 0) Rose else Quiet,
-                    "À vérifier : $attention alerte(s) en attente de prise en charge ou de confirmation. Les bruits répétés d’une chambre sont regroupés.")
+    LazyVerticalGrid(columns = GridCells.Adaptive(300.dp), modifier = modifier,
+        contentPadding = PaddingValues(16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        if (!state.isRunning) item(span = { GridItemSpan(maxLineSpan) }) {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Note("Service arrêté. Reprenez la surveillance et vérifiez les autorisations.", true)
+                Button(resume) { Text("Reprendre") }
             }
         }
-        if (!state.isRunning) item { Note("Service arrêté. Reprenez la surveillance et vérifiez les autorisations.", true); Button(resume) { Text("Reprendre") } }
-        if (state.notificationWarnings.isNotEmpty()) item { Note(state.notificationWarnings.joinToString("\n"), true) }
-        if (state.monitoredRooms.isEmpty()) item { Note("Aucune chambre appairée. Ajoutez les téléphones attendus avant votre prise de poste.") }
-        items(state.monitoredRooms.sortedWith(compareBy<RoomUnitState> { room ->
+        if (state.notificationWarnings.isNotEmpty()) item(span = { GridItemSpan(maxLineSpan) }) { Note(state.notificationWarnings.joinToString("\n"), true) }
+        if (state.monitoredRooms.isEmpty()) item(span = { GridItemSpan(maxLineSpan) }) { Note("Aucune chambre appairée. Ajoutez les téléphones attendus avant votre prise de poste.") }
+        gridItems(state.monitoredRooms.sortedWith(compareBy<RoomUnitState> { room ->
             when {
                 state.activeAlerts.any { it.roomId == room.id && !it.isAcknowledged } -> 0
                 room.status in listOf(RoomStatus.DISCONNECTED, RoomStatus.MIC_ERROR) -> 1
@@ -362,7 +395,7 @@ private suspend fun delayForPin() = kotlinx.coroutines.delay(1500)
             CompactRoomCard(room, state.activeAlerts.filter { it.roomId == room.id }, state.pendingActions,
                 open = { select(room.id) }, action = eventAction)
         }
-        item { OutlinedButton(add, Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Icon(Icons.Default.Add, null); Spacer(Modifier.width(8.dp)); Text("Ajouter une chambre") } }
+        item(span = { GridItemSpan(maxLineSpan) }) { OutlinedButton(add, Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Icon(Icons.Default.Add, null); Spacer(Modifier.width(8.dp)); Text("Ajouter une chambre") } }
     }
 }
 
@@ -437,59 +470,137 @@ private fun roomInformation(room: RoomUnitState, events: List<RoomAlertEvent>): 
         LinearProgressIndicator(progress = { if (enabled) level.coerceIn(0, 91) / 91f else 0f }, modifier = Modifier.fillMaxWidth().height(10.dp).clip(RoundedCornerShape(5.dp)), color = if (level >= threshold) Rose else Mint, trackColor = Color(0xFF2D4059))
     }
 }
-@Composable private fun RoomHome(modifier: Modifier, state: RoomMonitoringService.RoomServiceState, vm: MainViewModel, resume: () -> Unit, pair: () -> Unit) {
-    LazyColumn(modifier, contentPadding = PaddingValues(24.dp), verticalArrangement = Arrangement.spacedBy(20.dp)) {
-        item { Text(state.roomName.ifBlank { vm.prefs.roomName }, style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Bold); Text("Téléphone chambre", color = Quiet) }
-        item { Note(if (!state.isRunning) "Surveillance arrêtée : aucune capture vérifiée." else state.errorMessage ?: "${state.connectedMonitors} veilleur(s) connecté(s) · ${state.status.label()}", !state.isRunning || state.errorMessage != null || state.connectedMonitors == 0) }
-        if (!state.isRunning) item { Button(resume, Modifier.fillMaxWidth().heightIn(min = 52.dp)) { Text("Autoriser et reprendre") } }
-        item { Card(colors = CardDefaults.cardColors(containerColor = Panel), shape = RoundedCornerShape(24.dp)) { Column(Modifier.padding(24.dp)) { Level(state.currentDecibels, state.thresholdDb, state.isMicOperational) } } }
-        item { Text("Le son reste sur le réseau local. Aucun enregistrement audio n’est conservé.", color = Quiet) }
-        item { Note("Adresse Wi-Fi : ${state.localAddress.ifBlank { "indisponible" }} · port 9877\nLa découverte utilise mDNS et UDP. Sur un réseau invité ou isolé, l’équipe informatique doit autoriser les communications entre téléphones.") }
-        state.connectionDiagnostic?.let { error -> item { Note(error, true) } }
-        item { OutlinedButton(pair, Modifier.fillMaxWidth().heightIn(min = 52.dp), enabled = state.isRunning) { Icon(Icons.Default.QrCode2, null); Spacer(Modifier.width(8.dp)); Text("Appairer un veilleur") } }
-        item { Note("Pour modifier la chambre, le seuil ou tester la transmission, ouvrez les réglages professionnels. Le bouton Retour et l’extinction de l’écran n’arrêtent pas volontairement le service.") }
+@Composable private fun AdaptiveRoomPanels(modifier: Modifier, primary: @Composable ColumnScope.() -> Unit,
+    secondary: @Composable ColumnScope.() -> Unit) {
+    BoxWithConstraints(modifier) {
+        if (maxWidth >= 760.dp) Row(Modifier.fillMaxSize().padding(20.dp).testTag("room_panels_split"), horizontalArrangement = Arrangement.spacedBy(20.dp)) {
+            Column(Modifier.weight(1f).fillMaxHeight().verticalScroll(rememberScrollState()).testTag("room_primary"), verticalArrangement = Arrangement.spacedBy(16.dp), content = primary)
+            Column(Modifier.weight(1f).fillMaxHeight().verticalScroll(rememberScrollState()).testTag("room_secondary"), verticalArrangement = Arrangement.spacedBy(16.dp), content = secondary)
+        } else Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp).testTag("room_panels_single"), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            primary(); secondary()
+        }
     }
 }
-@Composable private fun RoomDetail(modifier: Modifier, room: RoomUnitState, state: MonitorMonitoringService.MonitorServiceState, vm: MainViewModel,
-    listen: () -> Unit, talk: () -> Unit, threshold: (Int) -> Unit, updateAddress: (String) -> Unit, pair: () -> Unit, forget: () -> Unit) {
-    var value by remember(room.noiseThresholdDb) { mutableFloatStateOf(room.noiseThresholdDb.toFloat()) }
-    var editAddress by remember { mutableStateOf(false) }
-    var address by remember(room.ipAddress) { mutableStateOf(room.ipAddress) }
-    LazyColumn(modifier, contentPadding = PaddingValues(24.dp), verticalArrangement = Arrangement.spacedBy(20.dp)) {
-        item { Text(room.name, style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Bold); Text(room.status.label(), color = room.status.tint()) }
-        if (room.diagnostic.isNotBlank()) item { Note(room.diagnostic, true) }
-        if (room.enrollmentPending) item {
-            Note("Le QR a été lu, mais la chambre n’a pas encore confirmé l’accès. La surveillance de cette chambre n’est pas active ; aucune alarme de coupure n’est déclenchée à cette étape.")
-            OutlinedButton(pair, Modifier.fillMaxWidth()) { Text("Scanner un nouveau QR") }
+
+@Composable private fun DisclosurePanel(title: String, expanded: Boolean, toggle: () -> Unit, content: @Composable ColumnScope.() -> Unit) {
+    Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(20.dp), colors = CardDefaults.cardColors(containerColor = Panel)) {
+        Row(Modifier.fillMaxWidth().clickable(role = Role.Button, onClickLabel = if (expanded) "Replier" else "Déplier", onClick = toggle)
+            .heightIn(min = 56.dp).padding(horizontal = 18.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(title, Modifier.weight(1f), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+            Icon(if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore, if (expanded) "Replier $title" else "Déplier $title", tint = Quiet)
         }
-        item {
-            Text("Connexion locale · ${room.ipAddress.ifBlank { "adresse inconnue" }}:9877", color = Quiet)
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                TextButton(onClick = { vm.reconnect(room.id) }) { Text("Réessayer") }
-                TextButton(onClick = { editAddress = !editAddress }) { Text("Corriger l’adresse") }
+        if (expanded) Column(Modifier.fillMaxWidth().padding(start = 18.dp, end = 18.dp, bottom = 18.dp), verticalArrangement = Arrangement.spacedBy(12.dp), content = content)
+    }
+}
+
+@Composable private fun RoomHeading(name: String, status: String, color: Color) {
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text(name, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
+        Text(status, color = color, style = MaterialTheme.typography.bodyMedium)
+    }
+}
+
+private fun RoomStatus.shortLabel() = when (this) {
+    RoomStatus.CALM -> "Calme"
+    RoomStatus.ACTIVITY -> "Activité sonore"
+    RoomStatus.ALERT -> "Seuil dépassé"
+    RoomStatus.DISCONNECTED -> "Hors ligne"
+    RoomStatus.MIC_ERROR -> "Microphone indisponible"
+    RoomStatus.DEGRADED -> "Mode dégradé"
+    RoomStatus.VERIFYING -> "Vérification en cours"
+}
+
+@Composable internal fun RoomHomePanel(modifier: Modifier, state: RoomMonitoringService.RoomServiceState, fallbackName: String,
+    resume: () -> Unit, settings: () -> Unit, pair: () -> Unit) {
+    var information by remember { mutableStateOf(false) }
+    AdaptiveRoomPanels(modifier, primary = {
+        RoomHeading(state.roomName.ifBlank { fallbackName }, if (!state.isRunning) "Surveillance arrêtée" else state.status.shortLabel(), if (state.isRunning) state.status.tint() else Rose)
+        Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(20.dp), colors = CardDefaults.cardColors(containerColor = Panel)) {
+            Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                Level(state.currentDecibels, state.thresholdDb, state.isMicOperational)
+                if (!state.isRunning) Button(resume, Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text("Reprendre la surveillance") }
+                else if (state.errorMessage != null) TapInfo("Incident de capture", state.errorMessage) { show ->
+                    TextButton(show) { Icon(Icons.Default.WarningAmber, null, tint = Rose); Spacer(Modifier.width(8.dp)); Text("Vérifier le microphone", color = Rose) }
+                }
+                if (state.isCaregiverTalking) Text("Interphone actif", color = Amber)
+            }
+        }
+    }, secondary = {
+        Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(20.dp), colors = CardDefaults.cardColors(containerColor = Panel)) {
+            Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                Text("${state.connectedMonitors} veilleur(s) connecté(s)", style = MaterialTheme.typography.titleMedium, color = if (state.connectedMonitors > 0) Mint else Amber)
+                OutlinedButton(pair, Modifier.fillMaxWidth().heightIn(min = 48.dp), enabled = state.isRunning) {
+                    Icon(Icons.Default.QrCode2, null); Spacer(Modifier.width(8.dp)); Text("Appairer un veilleur")
+                }
+            }
+        }
+        OutlinedButton(settings, Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Icon(Icons.Default.Tune, null); Spacer(Modifier.width(8.dp)); Text("Régler la sensibilité") }
+        DisclosurePanel("Informations de l’appareil", information, { information = !information }) {
+            Text("Adresse Wi-Fi : ${state.localAddress.ifBlank { "indisponible" }}", color = Quiet)
+            Text("Échantillons : ${state.samples}", color = Quiet)
+            Text("Dernière capture : ${if (state.captureAgeMs == Long.MAX_VALUE) "aucune" else "${state.captureAgeMs / 1000} s"}", color = Quiet)
+            state.connectionDiagnostic?.let { Text(it, color = Amber) }
+            state.errorMessage?.let { Text(it, color = Rose) }
+        }
+    })
+}
+
+@Composable internal fun RoomDetailPanel(modifier: Modifier, room: RoomUnitState, state: MonitorMonitoringService.MonitorServiceState,
+    listen: () -> Unit, talk: () -> Unit, reconnect: () -> Unit, eventAction: (List<RoomAlertEvent>, Boolean) -> Unit,
+    threshold: (Int) -> Unit, updateAddress: (String) -> Unit, pair: () -> Unit, forget: () -> Unit) {
+    var value by remember(room.id, room.noiseThresholdDb) { mutableFloatStateOf(room.noiseThresholdDb.toFloat()) }
+    var sensitivity by remember(room.id) { mutableStateOf(false) }
+    var information by remember(room.id) { mutableStateOf(false) }
+    val needsConnection = room.enrollmentPending || room.status in listOf(RoomStatus.DISCONNECTED, RoomStatus.VERIFYING, RoomStatus.DEGRADED)
+    var connection by remember(room.id) { mutableStateOf(needsConnection) }
+    LaunchedEffect(needsConnection) { if (needsConnection) connection = true }
+    var editAddress by remember(room.id) { mutableStateOf(false) }
+    var address by remember(room.id, room.ipAddress) { mutableStateOf(room.ipAddress) }
+    val groups = AlertGroup.active(state.activeAlerts.filter { it.roomId == room.id })
+    AdaptiveRoomPanels(modifier, primary = {
+        RoomHeading(room.name, if (room.enrollmentPending) "Appairage à terminer" else room.status.shortLabel(), room.status.tint())
+        Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(20.dp), colors = CardDefaults.cardColors(containerColor = Panel)) {
+            Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                Level(room.currentDecibels, room.noiseThresholdDb, room.isMicOperational)
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Button(listen, Modifier.weight(1f).heightIn(min = 48.dp), enabled = room.isMicOperational || state.activeListeningRoomId == room.id) { Text(if (state.activeListeningRoomId == room.id) "Couper l’écoute" else "Écouter") }
+                    OutlinedButton(talk, Modifier.weight(1f).heightIn(min = 48.dp), enabled = !room.enrollmentPending && room.status != RoomStatus.DISCONNECTED && room.status != RoomStatus.VERIFYING) { Text("Interphone") }
+                }
+            }
+        }
+        groups.forEach { GroupedEventCard(it, state.pendingActions, eventAction, showRoomName = false) }
+    }, secondary = {
+        DisclosurePanel("Sensibilité", sensitivity, { sensitivity = !sensitivity }) {
+            Text("Seuil relatif : ${value.toInt()}", color = Mint)
+            Slider(value, { value = it }, valueRange = 35f..85f)
+            OutlinedButton(onClick = { threshold(value.toInt()) }, enabled = !room.enrollmentPending && room.status !in listOf(RoomStatus.DISCONNECTED, RoomStatus.VERIFYING) && value.toInt() != room.noiseThresholdDb,
+                modifier = Modifier.fillMaxWidth()) { Text("Appliquer le réglage") }
+        }
+        DisclosurePanel("Informations de l’appareil", information, { information = !information }) {
+            Text("Batterie : ${if (room.batteryPercent >= 0) "${room.batteryPercent}%" else "inconnue"}${if (room.isCharging) " · en charge" else ""}", color = Quiet)
+            room.temperatureC?.let { Text("Température : ${"%.1f".format(Locale.FRANCE, it)} °C", color = Quiet) }
+            Text("Dernière donnée : ${if (room.lastSeenTimestamp > 0) clock(room.lastSeenTimestamp) else "aucune"}", color = Quiet)
+            Text("Échantillons : ${room.samplesCaptured}", color = Quiet)
+            if (room.diagnostic.isNotBlank()) Text(room.diagnostic, color = if (room.isMicOperational) Quiet else Amber)
+        }
+        DisclosurePanel("Connexion", connection, { connection = !connection }) {
+            Text(room.ipAddress.ifBlank { "Adresse inconnue" }, color = Quiet)
+            if (room.enrollmentPending) {
+                Text("Accès en attente de confirmation par la chambre.", color = Amber)
+                OutlinedButton(pair, Modifier.fillMaxWidth()) { Text("Scanner un nouveau QR") }
+            }
+            if (needsConnection && room.diagnostic.isNotBlank()) Text(room.diagnostic, color = Amber)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                TextButton(reconnect) { Text("Réessayer") }
+                TextButton({ editAddress = !editAddress }) { Text("Modifier l’IP") }
             }
             if (editAddress) {
-                OutlinedTextField(address, { address = it.take(80) }, label = { Text("IP affichée sur le téléphone chambre") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-                OutlinedButton(onClick = { updateAddress(address); editAddress = false }) { Text("Utiliser cette adresse") }
+                OutlinedTextField(address, { address = it.take(80) }, label = { Text("IP du téléphone chambre") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                OutlinedButton(onClick = { updateAddress(address); editAddress = false }, modifier = Modifier.fillMaxWidth()) { Text("Utiliser cette adresse") }
             }
+            TextButton(forget) { Text("Retirer cette chambre", color = Rose) }
         }
-        item { Level(room.currentDecibels, room.noiseThresholdDb, room.isMicOperational) }
-        item {
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                Button(listen, Modifier.weight(1f).heightIn(min = 52.dp), enabled = room.isMicOperational || state.activeListeningRoomId == room.id) { Text(if (state.activeListeningRoomId == room.id) "Couper l’écoute" else "Écouter") }
-                OutlinedButton(talk, Modifier.weight(1f).heightIn(min = 52.dp), enabled = room.status != RoomStatus.DISCONNECTED && room.status != RoomStatus.VERIFYING) { Text("Interphone") }
-            }
-        }
-        item { Note("Dernière donnée validée : ${if (room.lastSeenTimestamp > 0) clock(room.lastSeenTimestamp) else "aucune"}\nÉchantillons : ${room.samplesCaptured}\nBatterie : ${room.batteryPercent.takeIf { it >= 0 } ?: "inconnue"}%${room.temperatureC?.let { " · $it °C" } ?: ""}") }
-        item {
-            Text("Seuil relatif", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-            Text("Valeur confirmée : ${room.noiseThresholdDb} · nouveau réglage : ${value.toInt()}", color = Quiet)
-            Slider(value, { value = it }, valueRange = 35f..85f)
-            OutlinedButton(onClick = { threshold(value.toInt()) }, enabled = room.status != RoomStatus.DISCONNECTED) { Text("Appliquer le réglage") }
-        }
-        items(AlertGroup.active(state.activeAlerts.filter { it.roomId == room.id }), key = { it.key }) { GroupedEventCard(it, state.pendingActions, vm::eventActions) }
-        item { TextButton(forget) { Text("Retirer des chambres attendues", color = Rose) } }
-    }
+    })
 }
 @Composable private fun EventList(modifier: Modifier, events: List<RoomAlertEvent>, pending: Set<String>, action: (List<RoomAlertEvent>, Boolean) -> Unit) {
     var history by remember { mutableStateOf(false) }
@@ -508,14 +619,14 @@ private fun roomInformation(room: RoomUnitState, events: List<RoomAlertEvent>): 
     }
 }
 
-@Composable private fun GroupedEventCard(group: AlertGroup, pending: Set<String>, action: (List<RoomAlertEvent>, Boolean) -> Unit) {
+@Composable private fun GroupedEventCard(group: AlertGroup, pending: Set<String>, action: (List<RoomAlertEvent>, Boolean) -> Unit, showRoomName: Boolean = true) {
     var resolving by remember { mutableStateOf<List<RoomAlertEvent>?>(null) }
     val unchecked = group.events.filterNot { it.isAcknowledged }
     val targets = if (unchecked.isNotEmpty()) unchecked else group.events
     val waiting = targets.all { it.eventId in pending }
     Card(shape = RoundedCornerShape(22.dp), colors = CardDefaults.cardColors(containerColor = if (group.isAcknowledged) Panel else Color(0xFF3B2635))) {
         Column(Modifier.fillMaxWidth().padding(20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Text(group.roomName, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+            if (showRoomName) Text(group.roomName, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
             Text(group.eventType.label(), color = if (group.isAcknowledged) Mint else Amber)
             Text(if (group.occurrences > 1) "${group.occurrences} occurrences · dernière ${clock(group.lastTimestamp)}" else clock(group.lastTimestamp), color = Quiet, style = MaterialTheme.typography.bodySmall)
             if (group.isAcknowledged) Text("Pris en charge", color = Mint)

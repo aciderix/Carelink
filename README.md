@@ -4,11 +4,11 @@ Application Android de détection sonore et de communication sur réseau local, 
 
 ## Télécharger la version d’essai
 
-L’APK d’essai est inclus dans cette branche : **[CareLink 2.1.0-debug — télécharger](https://github.com/aciderix/Carelink/raw/refs/heads/carelink-v2-ameliorations-apk/downloads/CareLink-2.1.0-debug.apk)**. Depuis GitHub, ouvrir le fichier puis utiliser **Download raw file** si nécessaire. Le bouton **Code → Download ZIP** récupère aussi les sources et l’APK.
+L’APK d’essai est inclus dans cette branche : **[CareLink 2.2.0-debug — télécharger](https://github.com/aciderix/Carelink/raw/refs/heads/carelink-v2-ameliorations-apk/downloads/CareLink-2.2.0-debug.apk)**. Depuis GitHub, ouvrir le fichier puis utiliser **Download raw file** si nécessaire. Le bouton **Code → Download ZIP** récupère aussi les sources et l’APK.
 
-- [Dossier de téléchargement](downloads/) et [empreinte SHA-256](downloads/CareLink-2.1.0-debug.apk.sha256).
+- [Dossier de téléchargement](downloads/) et [empreinte SHA-256](downloads/CareLink-2.2.0-debug.apk.sha256).
 - [Résultats de validation](docs/RESULTATS_VALIDATION.md) et [consignes de qualification](docs/VALIDATION.md).
-- [Aperçu de l’accueil](docs/screenshots/welcome.png) et [tableau de surveillance](docs/screenshots/monitor-empty.png).
+- [Aperçu de l’accueil](docs/screenshots/welcome.png) et [tableau de surveillance](docs/screenshots/monitor-empty.png), [tablette en paysage](docs/screenshots/monitor-tablet-landscape.png) et [fiche de chambre](docs/screenshots/room-tablet-landscape.png).
 
 Il s’agit d’une version d’essai distincte de l’application de production. Sur Android, autoriser l’installation depuis la source utilisée pour télécharger l’APK. Consulter les étapes d’appairage ci-dessous et effectuer les essais sur les téléphones prévus avant utilisation en établissement.
 
@@ -22,6 +22,14 @@ Il s’agit d’une version d’essai distincte de l’application de production
 - Contrôles de fraîcheur, capture rendue silencieuse, silence numérique prolongé, erreurs et saturation. Le test de transmission ne prétend pas vérifier le microphone.
 - Interface sombre, navigation Surveillance / Événements / Réglages, protection optionnelle des actions sensibles par code et notifications sans acquittement accidentel depuis l’écran verrouillé.
 - Pas de SDK Firebase, pas de service cloud applicatif et pas d’enregistrement audio conservé.
+
+## Lisibilité et tablettes dans la version 2.2.0
+
+- Les indicateurs **Captures récentes** et **À vérifier** sont dans l’en-tête, à gauche du titre et de l’icône CareLink. Leurs explications s’ouvrent au toucher.
+- Les fiches de chambre mettent en avant l’état, le niveau sonore et les actions d’écoute ou d’interphone. La sensibilité, les informations de l’appareil et la connexion sont dans des sections repliables. Une connexion interrompue ouvre directement ses actions de reprise.
+- Le téléphone chambre présente le niveau, les veilleurs connectés et l’appairage ; les informations techniques se déplient à la demande.
+- La surveillance adapte le nombre de colonnes à la largeur. Les grandes fiches disposent de deux colonnes ; les écrans larges et les téléphones en paysage utilisent une barre de navigation latérale. Les formulaires restent centrés avec une largeur limitée.
+- Les rendus sont vérifiés en portrait et en paysage par des tests d’interface ; les essais sur des tablettes physiques restent à effectuer.
 
 ## Surveillance dans la version 2.1.0
 

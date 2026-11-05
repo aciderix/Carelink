@@ -13,6 +13,7 @@ import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import com.example.model.*
 import com.example.service.MonitorMonitoringService.MonitorServiceState
 import com.example.ui.MonitorDashboard
+import com.example.ui.CareLinkScaffold
 import com.example.ui.EventNavigationIcon
 import com.example.ui.theme.MyApplicationTheme
 import org.junit.*
@@ -31,6 +32,12 @@ class CompactDashboardTest {
         batteryPercent = 83, isMicOperational = true, lastSeenTimestamp = 1000, diagnostic = "Capture récente")
     private fun event(id: String, ack: Boolean = false) = RoomAlertEvent(eventId = id, roomId = room.id,
         roomName = room.name, timestamp = 1000, eventType = AlertEventType.SOUND_ALERT, isAcknowledged = ack)
+    @Composable private fun Dashboard(modifier: Modifier, state: MonitorServiceState, add: () -> Unit, select: (String) -> Unit,
+        eventAction: (List<RoomAlertEvent>, Boolean) -> Unit, resume: () -> Unit) {
+        CareLinkScaffold(DeviceRole.MONITOR_UNIT, state, 0, true, settings = {}, navigate = {}) {
+            MonitorDashboard(modifier, state, add, select, eventAction, resume)
+        }
+    }
     @Test fun roomShortcutAcknowledgesEveryDisplayedEpisodeThenResolvesWithoutOpeningTheRoom() {
         val active = mutableStateOf(listOf(event("one"), event("two")))
         val calls = mutableListOf<Pair<List<String>, Boolean>>()
@@ -38,7 +45,7 @@ class CompactDashboardTest {
         compose.setContent {
             MyApplicationTheme {
                 Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-                    MonitorDashboard(Modifier.fillMaxSize(), MonitorServiceState(isRunning = true, monitoredRooms = listOf(room,
+                    Dashboard(Modifier.fillMaxSize(), MonitorServiceState(isRunning = true, monitoredRooms = listOf(room,
                         room.copy(id = "room-14", name = "Chambre 14"), room.copy(id = "room-16", name = "Chambre 16", status = RoomStatus.DISCONNECTED, isMicOperational = false)), activeAlerts = active.value),
                         add = {}, select = { opened = true }, eventAction = { events, resolve -> calls.add(events.map { it.eventId } to resolve) }, resume = {})
                 }
@@ -64,14 +71,14 @@ class CompactDashboardTest {
     }
     @Test fun compactMetricsExplainTheirMeaningOnTap() {
         compose.setContent { MyApplicationTheme {
-            MonitorDashboard(Modifier.fillMaxSize(), MonitorServiceState(isRunning = true, monitoredRooms = listOf(room)), {}, {}, { _, _ -> }, {})
+            Dashboard(Modifier.fillMaxSize(), MonitorServiceState(isRunning = true, monitoredRooms = listOf(room)), {}, {}, { _, _ -> }, {})
         } }
         compose.onNodeWithContentDescription("Captures récentes").performClick()
         compose.onNodeWithText("Captures récentes : 1 sur 1 chambres. Le microphone transmet des échantillons récents.").assertIsDisplayed()
     }
     @Test fun roomDetailsAppearOnLongPress() {
         compose.setContent { MyApplicationTheme {
-            MonitorDashboard(Modifier.fillMaxSize(), MonitorServiceState(isRunning = true, monitoredRooms = listOf(room)), {}, {}, { _, _ -> }, {})
+            Dashboard(Modifier.fillMaxSize(), MonitorServiceState(isRunning = true, monitoredRooms = listOf(room)), {}, {}, { _, _ -> }, {})
         } }
         compose.onNodeWithText("Batterie : 83%", substring = true).assertDoesNotExist()
         compose.onNodeWithText("Chambre 12").performTouchInput { longClick() }
