@@ -29,7 +29,7 @@ class AlertManager(private val context: Context, private val store: EventStore =
             while (isActive) {
                 delay(1000)
                 val now = android.os.SystemClock.elapsedRealtime()
-                if (!prefs.isAlertRepeatEnabled) { since = now; continue }
+                if (prefs.isMonitoringPaused || !prefs.isAlertRepeatEnabled) { since = now; continue }
                 if (now - since >= prefs.alertRepeatIntervalSeconds.coerceIn(10, 120) * 1000L) {
                     refreshNotifications(remind = true)
                     since = now
@@ -56,11 +56,15 @@ class AlertManager(private val context: Context, private val store: EventStore =
         }
     }
     fun transition(eventId: String, resolve: Boolean) = transitionMany(listOf(eventId), resolve)
+    @Synchronized fun setMonitoringPaused(paused: Boolean) {
+        CareLinkNotificationHelper.setMonitoringPaused(context, paused)
+        refreshNotifications()
+    }
     @Synchronized fun transitionMany(eventIds: List<String>, resolve: Boolean) {
         store.monitorActions(eventIds, prefs.deviceLabel, resolve)
         publish(); refreshNotifications()
     }
-    @Synchronized private fun refreshNotifications(remind: Boolean = false) {
+    @Synchronized internal fun refreshNotifications(remind: Boolean = false) {
         if (!scope.isActive) return
         val pending = store.pendingCommandIds()
         val groups = AlertGroup.active(_events.value)

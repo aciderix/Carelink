@@ -37,6 +37,10 @@ class PreferencesManager(context: Context) {
         get() = prefs.getBoolean("is_role_locked", false)
         set(value) = prefs.edit().putBoolean("is_role_locked", value).apply()
 
+    var isMonitoringPaused: Boolean
+        get() = prefs.getBoolean("monitoring_paused", false)
+        set(value) { check(prefs.edit().putBoolean("monitoring_paused", value).commit()) { "État de pause non enregistré" } }
+
     var roomName: String
         get() = prefs.getString("room_name", "Chambre 1") ?: "Chambre 1"
         set(value) = prefs.edit().putString("room_name", value).apply()

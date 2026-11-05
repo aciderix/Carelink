@@ -1,3 +1,3 @@
-CareLink 2.2.1-debug
+CareLink 2.3.0-debug
 
 5 tests instrumentés compilés, non exécutés. La tentative antérieure sur émulateur Android 15 n’avait pas abouti au démarrage de l’environnement. Aucun succès de test instrumenté n’est revendiqué pour cette version. Les nouveaux contrôles de disposition sont exécutés sous Robolectric, pas sur tablette physique.

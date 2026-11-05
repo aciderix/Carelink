@@ -42,7 +42,16 @@ object CareLinkNotificationHelper {
     fun groupTag(roomId: String, kind: AlertEventType) = "carelink:$roomId:${kind.name}"
     fun cancelGroup(context: Context, roomId: String, kind: AlertEventType) =
         (context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager).cancel(groupTag(roomId, kind), 2000)
-    fun postGroup(context: Context, group: AlertGroup, pending: Set<String> = emptySet(), remind: Boolean = false) {
+    /** Serialize pause persistence/cancellation with every notification, including in-flight callbacks. */
+    @Synchronized fun setMonitoringPaused(context: Context, paused: Boolean) {
+        PreferencesManager(context).isMonitoringPaused = paused
+        if (paused) {
+            val nm = context.getSystemService(NotificationManager::class.java)
+            nm.activeNotifications.filter { it.id == 2000 || it.id == 1003 }.forEach { nm.cancel(it.tag, it.id) }
+        }
+    }
+    @Synchronized fun postGroup(context: Context, group: AlertGroup, pending: Set<String> = emptySet(), remind: Boolean = false) {
+        if (PreferencesManager(context).isMonitoringPaused) { cancelGroup(context, group.roomId, group.eventType); return }
         if (!group.needsAttention(pending)) { cancelGroup(context, group.roomId, group.eventType); return }
         val prefs = PreferencesManager(context)
         val title = "À vérifier · ${group.roomName}"
@@ -81,7 +90,9 @@ object CareLinkNotificationHelper {
             if (!PreferencesManager(context).isSoundAlertEnabled) add("Son désactivé dans CareLink")
         }
     }
-    fun restartReminder(context: Context) {
+    @Synchronized fun restartReminder(context: Context) {
+        val prefs = PreferencesManager(context)
+        if (prefs.role == DeviceRole.MONITOR_UNIT && prefs.isMonitoringPaused) return
         createNotificationChannels(context)
         val n = NotificationCompat.Builder(context, ALERTS).setSmallIcon(R.drawable.ic_stat_carelink)
             .setContentTitle("CareLink · reprise nécessaire").setContentText("Ouvrez l’application pour vérifier et reprendre la surveillance.")

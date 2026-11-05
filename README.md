@@ -4,9 +4,9 @@ Application Android de détection sonore et de communication sur réseau local, 
 
 ## Télécharger la version d’essai
 
-L’APK d’essai est inclus dans cette branche : **[CareLink 2.2.1-debug — télécharger](https://github.com/aciderix/Carelink/raw/refs/heads/carelink-v2-ameliorations-apk/downloads/CareLink-2.2.1-debug.apk)**. Depuis GitHub, ouvrir le fichier puis utiliser **Download raw file** si nécessaire. Le bouton **Code → Download ZIP** récupère aussi les sources et l’APK.
+L’APK d’essai est inclus dans cette branche : **[CareLink 2.3.0-debug — télécharger](https://github.com/aciderix/Carelink/raw/refs/heads/carelink-v2-ameliorations-apk/downloads/CareLink-2.3.0-debug.apk)**. Depuis GitHub, ouvrir le fichier puis utiliser **Download raw file** si nécessaire. Le bouton **Code → Download ZIP** récupère aussi les sources et l’APK.
 
-- [Dossier de téléchargement](downloads/) et [empreinte SHA-256](downloads/CareLink-2.2.1-debug.apk.sha256).
+- [Dossier de téléchargement](downloads/) et [empreinte SHA-256](downloads/CareLink-2.3.0-debug.apk.sha256).
 - [Résultats de validation](docs/RESULTATS_VALIDATION.md) et [consignes de qualification](docs/VALIDATION.md).
 - [Aperçu de l’accueil](docs/screenshots/welcome.png) et [tableau de surveillance](docs/screenshots/monitor-empty.png), [tablette en paysage](docs/screenshots/monitor-tablet-landscape.png) et [fiche de chambre](docs/screenshots/room-tablet-landscape.png).
 
@@ -22,6 +22,15 @@ Il s’agit d’une version d’essai distincte de l’application de production
 - Contrôles de fraîcheur, capture rendue silencieuse, silence numérique prolongé, erreurs et saturation. Le test de transmission ne prétend pas vérifier le microphone.
 - Interface sombre, navigation Surveillance / Événements / Réglages, protection optionnelle des actions sensibles par code et notifications sans acquittement accidentel depuis l’écran verrouillé.
 - Pas de SDK Firebase, pas de service cloud applicatif et pas d’enregistrement audio conservé.
+
+## Pause du veilleur dans la version 2.3.0
+
+- Le bouton **Pause**, à gauche des paramètres dans l’en-tête, suspend les alertes et rappels de ce veilleur. Un appui long affiche une courte aide ; le même bouton permet de reprendre.
+- Les teintes orange, le bandeau **Surveillance en pause** et la notification permanente indiquent le mode. La pause reste mémorisée après fermeture, redémarrage ou mise à jour, jusqu’à reprise explicite.
+- Les chambres et les autres veilleurs restent actifs. La connexion, le journal et les commandes manuelles d’écoute/interphone restent disponibles. La pause ne prend en charge ni ne résout automatiquement un événement.
+- À la reprise, les groupes encore non résolus et non pris en charge retrouvent leurs alertes. Les actions déjà en attente de confirmation restent respectées.
+- Si la protection par code est active, l’activation de la pause demande ce code. Sans protection, un toucher suffit ; la reprise reste directement accessible.
+- Sur les petits écrans, les compteurs passent sur une seconde ligne lorsque la présence du bouton Retour ou le texte agrandi l’exige, pour conserver tous les contrôles accessibles.
 
 ## Alignement des fiches dans la version 2.2.1
 

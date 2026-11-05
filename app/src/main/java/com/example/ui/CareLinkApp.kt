@@ -39,6 +39,7 @@ import androidx.core.graphics.drawable.toBitmap
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -62,7 +63,9 @@ private val Amber = Color(0xFFFFD08A)
 private val Rose = Color(0xFFFF879D)
 private val Ink = Color(0xFF10202B)
 private val Quiet = Color(0xFFA9B9C9)
-private val Panel = Color(0xFF152338)
+private val LocalMonitorPaused = staticCompositionLocalOf { false }
+private val Panel: Color
+    @Composable get() = if (LocalMonitorPaused.current) Color(0xFF33261E) else Color(0xFF152338)
 
 private fun RoomStatus.label() = when (this) {
     RoomStatus.VERIFYING -> "À vérifier"
@@ -156,6 +159,10 @@ fun CareLinkApp(vm: MainViewModel, startRole: (DeviceRole) -> Unit,
     CareLinkScaffold(role, monitor, tab, role != DeviceRole.NONE && !addRoom,
         back = if (addRoom || detailId != null) ({ if (addRoom) { addRoom = false; scan = false } else detailId = null }) else null,
         settings = if (role != DeviceRole.NONE && !addRoom) ({ protect("Ouvrir les réglages professionnels ?") { tab = 2; detailId = null } }) else null,
+        pause = { paused ->
+            if (paused && vm.prefs.isRoleLocked) protect("Mettre les alertes et rappels de ce veilleur en pause ?") { vm.setMonitoringPaused(true) }
+            else vm.setMonitoringPaused(paused)
+        },
         navigate = { next -> if (next == 2) protect("Ouvrir les réglages professionnels ?") { tab = 2; detailId = null } else { tab = next; detailId = null } },
         snackbar = snackbar) { body ->
             val width = body.widthIn(max = 1280.dp).fillMaxSize()
@@ -233,51 +240,95 @@ fun CareLinkApp(vm: MainViewModel, startRole: (DeviceRole) -> Unit,
 
 @Composable internal fun CareLinkScaffold(role: DeviceRole, monitor: MonitorMonitoringService.MonitorServiceState,
     tab: Int, showNavigation: Boolean, back: (() -> Unit)? = null, settings: (() -> Unit)? = null,
+    pause: (Boolean) -> Unit = {},
     navigate: (Int) -> Unit, snackbar: SnackbarHostState = remember { SnackbarHostState() },
     content: @Composable (Modifier) -> Unit) {
-    BoxWithConstraints(Modifier.fillMaxSize()) {
-        val rail = maxWidth >= 840.dp || (maxWidth >= 600.dp && maxHeight < 480.dp)
-        val destinations = if (role == DeviceRole.MONITOR_UNIT) listOf(0, 1, 2) else listOf(0, 2)
-        val labels = listOf("Surveillance", "Événements", "Réglages")
-        val icons = listOf(Icons.Default.SpaceDashboard, Icons.Default.Notifications, Icons.Default.Tune)
-        val count = AlertGroup.active(monitor.activeAlerts).size
-        val healthy = monitor.monitoredRooms.count { it.isMicOperational && it.status in listOf(RoomStatus.CALM, RoomStatus.ACTIVITY, RoomStatus.ALERT) }
-        val unchecked = AlertGroup.active(monitor.activeAlerts).count { !it.isAcknowledged }
-        Scaffold(containerColor = MaterialTheme.colorScheme.background,
-            snackbarHost = { SnackbarHost(snackbar) }, topBar = {
-                Surface(color = MaterialTheme.colorScheme.background) {
-                    Row(Modifier.fillMaxWidth().statusBarsPadding().heightIn(min = 64.dp).padding(horizontal = 8.dp, vertical = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        if (back != null) IconButton(back) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Retour") }
-                        if (role == DeviceRole.MONITOR_UNIT && showNavigation) {
-                            CompactMetric("Captures récentes", "$healthy/${monitor.monitoredRooms.size}", Icons.Default.Sensors, Mint,
-                                "Captures récentes : $healthy sur ${monitor.monitoredRooms.size} chambres. Le microphone transmet des échantillons récents.")
-                            CompactMetric("À vérifier", unchecked.toString(), Icons.Default.PriorityHigh, if (unchecked > 0) Rose else Quiet,
-                                "À vérifier : $unchecked alerte(s) en attente de prise en charge. Touchez une chambre ou ouvrez les événements.")
+    val paused = role == DeviceRole.MONITOR_UNIT && monitor.isPaused
+    val currentColors = MaterialTheme.colorScheme
+    val colors = if (paused) currentColors.copy(primary = Amber, secondary = Amber,
+        primaryContainer = Color(0xFF603A1E), secondaryContainer = Color(0xFF603A1E), onSecondaryContainer = Amber,
+        background = Color(0xFF211A16), surface = Color(0xFF33261E)) else currentColors
+    MaterialTheme(colorScheme = colors) {
+        CompositionLocalProvider(LocalMonitorPaused provides paused) {
+            BoxWithConstraints(Modifier.fillMaxSize()) {
+                val rail = maxWidth >= 840.dp || (maxWidth >= 600.dp && maxHeight < 480.dp)
+                val metrics = role == DeviceRole.MONITOR_UNIT && showNavigation
+                val separateMetrics = metrics && (maxWidth < 360.dp || (back != null && maxWidth < 440.dp) || (LocalDensity.current.fontScale > 1.15f && maxWidth < 480.dp))
+                val destinations = if (role == DeviceRole.MONITOR_UNIT) listOf(0, 1, 2) else listOf(0, 2)
+                val labels = listOf("Surveillance", "Événements", "Réglages")
+                val icons = listOf(Icons.Default.SpaceDashboard, Icons.Default.Notifications, Icons.Default.Tune)
+                val count = AlertGroup.active(monitor.activeAlerts).size
+                val healthy = monitor.monitoredRooms.count { it.isMicOperational && it.status in listOf(RoomStatus.CALM, RoomStatus.ACTIVITY, RoomStatus.ALERT) }
+                val unchecked = AlertGroup.active(monitor.activeAlerts).count { !it.isAcknowledged }
+                Scaffold(containerColor = MaterialTheme.colorScheme.background,
+                    snackbarHost = { SnackbarHost(snackbar) }, topBar = {
+                        Surface(color = MaterialTheme.colorScheme.background) {
+                            Column(Modifier.statusBarsPadding()) {
+                                Row(Modifier.fillMaxWidth().heightIn(min = 64.dp).padding(horizontal = 8.dp, vertical = 4.dp),
+                                    verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    if (back != null) IconButton(back) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Retour") }
+                                    if (metrics && !separateMetrics) {
+                                        CompactMetric("Captures récentes", "$healthy/${monitor.monitoredRooms.size}", Icons.Default.Sensors, Mint,
+                                            "Captures récentes : $healthy sur ${monitor.monitoredRooms.size} chambres. Le microphone transmet des échantillons récents.")
+                                        CompactMetric("À vérifier", unchecked.toString(), Icons.Default.PriorityHigh, if (unchecked > 0) Rose else Quiet,
+                                            "À vérifier : $unchecked alerte(s) en attente de prise en charge. Touchez une chambre ou ouvrez les événements.")
+                                    }
+                                    Row(Modifier.weight(1f).testTag("header_title"), verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        CareLinkIcon()
+                                        Text("CareLink", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold,
+                                            maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                    }
+                                    if (metrics) MonitorPauseButton(paused, monitor.isRunning, pause)
+                                    if (settings != null) IconButton(settings) { Icon(Icons.Default.Settings, "Réglages et diagnostic") }
+                                }
+                                if (separateMetrics) Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    CompactMetric("Captures récentes", "$healthy/${monitor.monitoredRooms.size}", Icons.Default.Sensors, Mint,
+                                        "Captures récentes : $healthy sur ${monitor.monitoredRooms.size} chambres. Le microphone transmet des échantillons récents.")
+                                    CompactMetric("À vérifier", unchecked.toString(), Icons.Default.PriorityHigh, if (unchecked > 0) Rose else Quiet,
+                                        "À vérifier : $unchecked alerte(s) en attente de prise en charge. Touchez une chambre ou ouvrez les événements.")
+                                }
+                                if (paused) Row(Modifier.fillMaxWidth().background(Color(0xFF49301D)).padding(horizontal = 16.dp, vertical = 8.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(Icons.Default.Pause, null, Modifier.size(16.dp), tint = Amber)
+                                    Text("Surveillance en pause · alertes suspendues", color = Amber, style = MaterialTheme.typography.labelMedium)
+                                }
+                            }
                         }
-                        Row(Modifier.weight(1f).testTag("header_title"), verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            CareLinkIcon()
-                            Text("CareLink", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold,
-                                maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }, bottomBar = {
+                        if (showNavigation && !rail) NavigationBar(Modifier.testTag("navigation_bar"), containerColor = Panel) {
+                            destinations.forEach { index -> NavigationBarItem(selected = tab == index, onClick = { navigate(index) },
+                                icon = { if (index == 1) EventNavigationIcon(count) else Icon(icons[index], null) }, label = { Text(labels[index]) }) }
                         }
-                        if (settings != null) IconButton(settings) { Icon(Icons.Default.Settings, "Réglages et diagnostic") }
+                    }) { padding ->
+                    Row(Modifier.fillMaxSize().padding(padding)) {
+                        if (showNavigation && rail) {
+                            NavigationRail(Modifier.fillMaxHeight().testTag("navigation_rail"), containerColor = Panel, windowInsets = WindowInsets(0, 0, 0, 0)) {
+                                destinations.forEach { index -> NavigationRailItem(selected = tab == index, onClick = { navigate(index) },
+                                    icon = { if (index == 1) EventNavigationIcon(count) else Icon(icons[index], null) }, label = { Text(labels[index]) }) }
+                            }
+                        }
+                        Box(Modifier.weight(1f).fillMaxHeight(), contentAlignment = Alignment.TopCenter) { content(Modifier) }
                     }
                 }
-            }, bottomBar = {
-                if (showNavigation && !rail) NavigationBar(Modifier.testTag("navigation_bar"), containerColor = Panel) {
-                    destinations.forEach { index -> NavigationBarItem(selected = tab == index, onClick = { navigate(index) },
-                        icon = { if (index == 1) EventNavigationIcon(count) else Icon(icons[index], null) }, label = { Text(labels[index]) }) }
-                }
-            }) { padding ->
-            Row(Modifier.fillMaxSize().padding(padding)) {
-                if (showNavigation && rail) {
-                    NavigationRail(Modifier.fillMaxHeight().testTag("navigation_rail"), containerColor = Panel, windowInsets = WindowInsets(0, 0, 0, 0)) {
-                        destinations.forEach { index -> NavigationRailItem(selected = tab == index, onClick = { navigate(index) },
-                            icon = { if (index == 1) EventNavigationIcon(count) else Icon(icons[index], null) }, label = { Text(labels[index]) }) }
-                    }
-                }
-                Box(Modifier.weight(1f).fillMaxHeight(), contentAlignment = Alignment.TopCenter) { content(Modifier) }
+            }
+        }
+    }
+}
+
+@Composable private fun MonitorPauseButton(paused: Boolean, enabled: Boolean, change: (Boolean) -> Unit) {
+    val help = rememberTooltipState(isPersistent = true)
+    val scope = rememberCoroutineScope()
+    val label = if (paused) "Reprendre la surveillance" else "Mettre la surveillance en pause"
+    TooltipBox(positionProvider = TooltipDefaults.rememberPlainTooltipPositionProvider(), state = help, enableUserInput = false,
+        tooltip = { PlainTooltip { Text("Suspend les alertes et rappels de ce veilleur. Le journal est conservé. Touchez à nouveau pour reprendre.") } }) {
+        Surface(color = if (paused) Amber else Color.Transparent, shape = RoundedCornerShape(14.dp),
+            modifier = Modifier.size(48.dp).clip(RoundedCornerShape(14.dp))
+                .combinedClickable(enabled = enabled, role = Role.Button, onClickLabel = label,
+                    onLongClickLabel = "Expliquer la pause", onLongClick = { scope.launch { help.show() } }, onClick = { change(!paused) })
+                .semantics { contentDescription = label; stateDescription = if (paused) "Pause active" else "Surveillance active" }) {
+            Box(contentAlignment = Alignment.Center) {
+                Icon(if (paused) Icons.Default.PlayArrow else Icons.Default.Pause, null, tint = if (paused) Ink else if (enabled) Quiet else Quiet.copy(alpha = 0.4f))
             }
         }
     }

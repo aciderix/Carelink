@@ -1,12 +1,12 @@
 {
-  "version": "2.2.1-debug",
-  "versionCode": 8,
+  "version": "2.3.0-debug",
+  "versionCode": 9,
   "applicationId": "com.aistudio.cradlelink.vxrtw.debug",
-  "apk": "CareLink-2.2.1-debug.apk",
-  "bytes": 19435706,
-  "sha256": "8c1b8d02bcd90a3657d6d2bb0994c63f4d643e9a2de63dd58e6dca50c037587b",
+  "apk": "CareLink-2.3.0-debug.apk",
+  "bytes": 19452090,
+  "sha256": "67730bbd1f3ca029106c08818983369e9db061eba488a427ac5e116ed98f8aa3",
   "jvm": {
-    "tests": 53,
+    "tests": 62,
     "failures": 0,
     "errors": 0,
     "skipped": 0

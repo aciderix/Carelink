@@ -59,6 +59,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         } catch (_: Exception) { message.value = "Android refuse le démarrage. Gardez l’application visible et vérifiez les autorisations." }
     }
     fun stop() { cancelPairing(); prefs.role = DeviceRole.NONE; role.value = DeviceRole.NONE; RoomMonitoringService.stopService(context); MonitorMonitoringService.stopService(context) }
+    fun setMonitoringPaused(paused: Boolean) {
+        try { MonitorMonitoringService.setMonitoringPaused(context, paused) }
+        catch (_: Exception) { message.value = "Impossible de modifier la pause. Gardez l’application ouverte et réessayez." }
+    }
     fun roomSettings(name: String, threshold: Int, duration: Int) {
         prefs.roomName = name.trim().take(80).ifBlank { "Chambre" }; prefs.defaultSensitivityDb = threshold; prefs.minNoiseDurationMs = duration
     }

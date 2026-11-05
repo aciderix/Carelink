@@ -18,7 +18,8 @@ class MonitorMonitoringService : Service() {
         val activeAlerts: List<RoomAlertEvent> = emptyList(), val history: List<RoomAlertEvent> = emptyList(),
         val activeListeningRoomId: String? = null, val isTransmittingVoice: Boolean = false,
         val diagnostic: String? = null, val pendingActions: Set<String> = emptySet(), val notificationWarnings: List<String> = emptyList(),
-        val nearbyRooms: List<LanDiscoveryManager.DiscoveredRoomBeacon> = emptyList(), val discoveryDiagnostic: String = "Recherche réseau en cours…")
+        val nearbyRooms: List<LanDiscoveryManager.DiscoveredRoomBeacon> = emptyList(), val discoveryDiagnostic: String = "Recherche réseau en cours…",
+        val isPaused: Boolean = false)
     companion object {
         const val ACTION_START = "monitor.START"; const val ACTION_REFRESH = "monitor.REFRESH"
         const val ACTION_ACKNOWLEDGE = "monitor.ACK"; const val ACTION_RESOLVE = "monitor.RESOLVE"
@@ -26,6 +27,7 @@ class MonitorMonitoringService : Service() {
         const val ACTION_STOP_TALK = "monitor.STOP_TALK"; const val ACTION_SET_THRESHOLD = "monitor.THRESHOLD"
         const val ACTION_FORGET = "monitor.FORGET"
         const val ACTION_RECONNECT = "monitor.RECONNECT"
+        const val ACTION_SET_PAUSED = "monitor.SET_PAUSED"
         private val _state = MutableStateFlow(MonitorServiceState())
         val serviceState = _state.asStateFlow()
         private fun command(c: Context, action: String, id: String? = null, value: Int? = null) {
@@ -54,6 +56,10 @@ class MonitorMonitoringService : Service() {
         fun sendRemoteThreshold(c: Context, id: String, threshold: Int) = command(c, ACTION_SET_THRESHOLD, id, threshold)
         fun forget(c: Context, id: String) = command(c, ACTION_FORGET, id)
         fun reconnect(c: Context, id: String) = command(c, ACTION_RECONNECT, id)
+        fun setMonitoringPaused(c: Context, paused: Boolean) {
+            val intent = Intent(c, MonitorMonitoringService::class.java).setAction(ACTION_SET_PAUSED).putExtra("paused", paused)
+            if (Build.VERSION.SDK_INT >= 26) c.startForegroundService(intent) else c.startService(intent)
+        }
     }
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private lateinit var prefs: PreferencesManager
@@ -76,16 +82,33 @@ class MonitorMonitoringService : Service() {
     private fun foreground(microphone: Boolean = false) {
         var type = if (Build.VERSION.SDK_INT >= 29) ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE else 0
         if (microphone && Build.VERSION.SDK_INT >= 30) type = type or ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
-        ServiceCompat.startForeground(this, 1002, CareLinkNotificationHelper.ongoing(this, "CareLink · Veilleur", "Surveillance des chambres appairées"), type)
+        ServiceCompat.startForeground(this, 1002, statusNotification(), type)
+    }
+    private fun statusNotification(): Notification {
+        val state = _state.value
+        val paused = prefs.isMonitoringPaused
+        val healthy = state.monitoredRooms.count { it.status in listOf(RoomStatus.CALM, RoomStatus.ACTIVITY, RoomStatus.ALERT) }
+        val pending = AlertGroup.active(state.activeAlerts).count { !it.isAcknowledged }
+        return CareLinkNotificationHelper.ongoing(this, if (paused) "CareLink · Veilleur en pause" else "CareLink · Veilleur",
+            if (paused) "Alertes et rappels suspendus sur ce poste" else "$healthy/${state.monitoredRooms.size} captures récentes · $pending événement(s) à vérifier")
     }
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (intent?.action == ACTION_SET_PAUSED && intent.hasExtra("paused")) {
+            try {
+                val paused = intent.getBooleanExtra("paused", false)
+                alerts?.setMonitoringPaused(paused) ?: CareLinkNotificationHelper.setMonitoringPaused(this, paused)
+            } catch (_: Exception) { _state.update { it.copy(diagnostic = "Impossible d’enregistrer la pause. Vérifiez l’état du poste.") } }
+        }
+        _state.update { it.copy(isPaused = prefs.isMonitoringPaused) }
         if (!running) {
             try { foreground() } catch (_: Exception) {
-                _state.value = MonitorServiceState(diagnostic = "Démarrage refusé par Android. Ouvrez l’application pour reprendre.")
+                _state.value = MonitorServiceState(isPaused = prefs.isMonitoringPaused, diagnostic = "Démarrage refusé par Android. Ouvrez l’application pour reprendre.")
                 stopSelf(); return START_NOT_STICKY
             }
             running = true; _state.update { it.copy(isRunning = true) }
             initialize()
+        } else if (intent?.action == ACTION_SET_PAUSED) {
+            (getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager).notify(1002, statusNotification())
         }
         val id = intent?.getStringExtra("id")
         scope.launch {
@@ -125,6 +148,8 @@ class MonitorMonitoringService : Service() {
         try {
             store.prune()
             val manager = AlertManager(this@MonitorMonitoringService, store); alerts = manager
+            // A pause/resume command can arrive while the manager is being constructed.
+            manager.refreshNotifications()
             launch { manager.history.collect { events -> _state.update { it.copy(history = events, activeAlerts = events.filterNot { e -> e.resolved }) } } }
             val network = MonitorClient(this@MonitorMonitoringService, store); client = network
             network.onRoomAlertReceived = { if (running) manager.triggerAlert(it) }
@@ -173,10 +198,7 @@ class MonitorMonitoringService : Service() {
                 _state.update { it.copy(nearbyRooms = nearby.values.map { entry -> entry.first }.sortedBy { entry -> entry.id }) }
                 network.checkDeadlines()
                 _state.update { it.copy(pendingActions = store.pendingCommandIds(), notificationWarnings = CareLinkNotificationHelper.readiness(this@MonitorMonitoringService)) }
-                val healthy = rooms.values.count { it.status in listOf(RoomStatus.CALM, RoomStatus.ACTIVITY, RoomStatus.ALERT) }
-                val pending = AlertGroup.active(_state.value.activeAlerts).count { !it.isAcknowledged }
-                (getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager).notify(1002,
-                    CareLinkNotificationHelper.ongoing(this@MonitorMonitoringService, "CareLink · Veilleur", "$healthy/${rooms.size} captures récentes · $pending événement(s) à vérifier"))
+                (getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager).notify(1002, statusNotification())
                 delay(1000)
             }
         } catch (e: Exception) {
@@ -225,7 +247,7 @@ class MonitorMonitoringService : Service() {
         running = false; scope.cancel(); discovery?.release(); client?.disconnectAll(); alerts?.release()
         networkLocks?.close()
         runCatching { if (wake?.isHeld == true) wake?.release() }
-        _state.value = MonitorServiceState(diagnostic = _state.value.diagnostic, monitoredRooms = rooms.values.map { it.copy(status = RoomStatus.DISCONNECTED, isMicOperational = false) })
+        _state.value = MonitorServiceState(isPaused = prefs.isMonitoringPaused, diagnostic = _state.value.diagnostic, monitoredRooms = rooms.values.map { it.copy(status = RoomStatus.DISCONNECTED, isMicOperational = false) })
         ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE); super.onDestroy()
     }
 }
