@@ -470,14 +470,17 @@ private fun roomInformation(room: RoomUnitState, events: List<RoomAlertEvent>): 
         LinearProgressIndicator(progress = { if (enabled) level.coerceIn(0, 91) / 91f else 0f }, modifier = Modifier.fillMaxWidth().height(10.dp).clip(RoundedCornerShape(5.dp)), color = if (level >= threshold) Rose else Mint, trackColor = Color(0xFF2D4059))
     }
 }
-@Composable private fun AdaptiveRoomPanels(modifier: Modifier, primary: @Composable ColumnScope.() -> Unit,
+@Composable private fun AdaptiveRoomPanels(modifier: Modifier, heading: @Composable () -> Unit, primary: @Composable ColumnScope.() -> Unit,
     secondary: @Composable ColumnScope.() -> Unit) {
     BoxWithConstraints(modifier) {
-        if (maxWidth >= 760.dp) Row(Modifier.fillMaxSize().padding(20.dp).testTag("room_panels_split"), horizontalArrangement = Arrangement.spacedBy(20.dp)) {
-            Column(Modifier.weight(1f).fillMaxHeight().verticalScroll(rememberScrollState()).testTag("room_primary"), verticalArrangement = Arrangement.spacedBy(16.dp), content = primary)
-            Column(Modifier.weight(1f).fillMaxHeight().verticalScroll(rememberScrollState()).testTag("room_secondary"), verticalArrangement = Arrangement.spacedBy(16.dp), content = secondary)
+        if (maxWidth >= 760.dp) Column(Modifier.fillMaxSize().padding(20.dp).testTag("room_panels_split"), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            heading()
+            Row(Modifier.weight(1f).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(20.dp)) {
+                Column(Modifier.weight(1f).fillMaxHeight().verticalScroll(rememberScrollState()).testTag("room_primary"), verticalArrangement = Arrangement.spacedBy(16.dp), content = primary)
+                Column(Modifier.weight(1f).fillMaxHeight().verticalScroll(rememberScrollState()).testTag("room_secondary"), verticalArrangement = Arrangement.spacedBy(16.dp), content = secondary)
+            }
         } else Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp).testTag("room_panels_single"), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-            primary(); secondary()
+            heading(); primary(); secondary()
         }
     }
 }
@@ -493,10 +496,14 @@ private fun roomInformation(room: RoomUnitState, events: List<RoomAlertEvent>): 
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable private fun RoomHeading(name: String, status: String, color: Color) {
-    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Text(name, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
-        Text(status, color = color, style = MaterialTheme.typography.bodyMedium)
+    FlowRow(Modifier.fillMaxWidth().testTag("room_heading"), horizontalArrangement = Arrangement.spacedBy(16.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(name, Modifier.align(Alignment.CenterVertically).testTag("room_title"), style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
+        Surface(color = color.copy(alpha = 0.12f), shape = RoundedCornerShape(12.dp), modifier = Modifier.align(Alignment.CenterVertically).testTag("room_status")) {
+            Text(status, Modifier.padding(horizontal = 12.dp, vertical = 6.dp), color = color, style = MaterialTheme.typography.bodyMedium)
+        }
     }
 }
 
@@ -513,9 +520,10 @@ private fun RoomStatus.shortLabel() = when (this) {
 @Composable internal fun RoomHomePanel(modifier: Modifier, state: RoomMonitoringService.RoomServiceState, fallbackName: String,
     resume: () -> Unit, settings: () -> Unit, pair: () -> Unit) {
     var information by remember { mutableStateOf(false) }
-    AdaptiveRoomPanels(modifier, primary = {
+    AdaptiveRoomPanels(modifier, heading = {
         RoomHeading(state.roomName.ifBlank { fallbackName }, if (!state.isRunning) "Surveillance arrêtée" else state.status.shortLabel(), if (state.isRunning) state.status.tint() else Rose)
-        Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(20.dp), colors = CardDefaults.cardColors(containerColor = Panel)) {
+    }, primary = {
+        Card(Modifier.fillMaxWidth().testTag("room_level"), shape = RoundedCornerShape(20.dp), colors = CardDefaults.cardColors(containerColor = Panel)) {
             Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
                 Level(state.currentDecibels, state.thresholdDb, state.isMicOperational)
                 if (!state.isRunning) Button(resume, Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text("Reprendre la surveillance") }
@@ -526,7 +534,7 @@ private fun RoomStatus.shortLabel() = when (this) {
             }
         }
     }, secondary = {
-        Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(20.dp), colors = CardDefaults.cardColors(containerColor = Panel)) {
+        Card(Modifier.fillMaxWidth().testTag("room_monitors"), shape = RoundedCornerShape(20.dp), colors = CardDefaults.cardColors(containerColor = Panel)) {
             Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
                 Text("${state.connectedMonitors} veilleur(s) connecté(s)", style = MaterialTheme.typography.titleMedium, color = if (state.connectedMonitors > 0) Mint else Amber)
                 OutlinedButton(pair, Modifier.fillMaxWidth().heightIn(min = 48.dp), enabled = state.isRunning) {
@@ -557,9 +565,10 @@ private fun RoomStatus.shortLabel() = when (this) {
     var editAddress by remember(room.id) { mutableStateOf(false) }
     var address by remember(room.id, room.ipAddress) { mutableStateOf(room.ipAddress) }
     val groups = AlertGroup.active(state.activeAlerts.filter { it.roomId == room.id })
-    AdaptiveRoomPanels(modifier, primary = {
+    AdaptiveRoomPanels(modifier, heading = {
         RoomHeading(room.name, if (room.enrollmentPending) "Appairage à terminer" else room.status.shortLabel(), room.status.tint())
-        Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(20.dp), colors = CardDefaults.cardColors(containerColor = Panel)) {
+    }, primary = {
+        Card(Modifier.fillMaxWidth().testTag("room_level"), shape = RoundedCornerShape(20.dp), colors = CardDefaults.cardColors(containerColor = Panel)) {
             Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
                 Level(room.currentDecibels, room.noiseThresholdDb, room.isMicOperational)
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {

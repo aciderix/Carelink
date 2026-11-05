@@ -1,4 +1,4 @@
-# Résultats de validation de CareLink 2.2.0-debug
+# Résultats de validation de CareLink 2.2.1-debug
 
 Vérifications locales effectuées le 5 novembre 2026.
 
@@ -12,7 +12,7 @@ Vérifications locales effectuées le 5 novembre 2026.
 | Analyse Android Lint | Réussite sans erreur bloquante ; des avertissements subsistent |
 | Signature de l’APK | Vérifiée ; même certificat de développement que les versions précédentes |
 
-Les huit nouveaux tests d’interface contrôlent l’ordre des indicateurs à gauche du titre, la grille sur téléphone 360 × 800 dp et tablette 800 × 1280 / 1280 × 800 dp, ainsi que la navigation latérale sur écran large et téléphone en paysage 800 × 360 dp. Ils vérifient les commandes principales des fiches, le repli des informations et de la sensibilité, l’accès immédiat aux actions de reprise lors d’une coupure et l’affichage du téléphone chambre sur tablette. Les captures ont été inspectées ; elles proviennent de données d’essai et du rendu Robolectric, sans essai sur une tablette physique. Voir [la matrice des contrôles](validation-results/layout-checks.json).
+Les tests de disposition contrôlent l’ordre des indicateurs à gauche du titre, la grille sur téléphone 360 × 800 dp et tablette 800 × 1280 / 1280 × 800 dp, ainsi que la navigation latérale sur écran large et téléphone en paysage 800 × 360 dp. Ils vérifient les commandes principales des fiches, le repli des informations et de la sensibilité, l’accès immédiat aux actions de reprise lors d’une coupure et l’affichage du téléphone chambre sur tablette. Les contrôles de géométrie des deux vues de chambre vérifient aussi le titre et l’état sur une même ligne, puis les deux colonnes et leurs premières cartes alignées sous cet en-tête commun. Les captures ont été inspectées ; elles proviennent de données d’essai et du rendu Robolectric, sans essai sur une tablette physique. Voir [la matrice des contrôles](validation-results/layout-checks.json).
 
 Les régressions existantes vérifient les raccourcis sans navigation involontaire, les informations au toucher et à l’appui long, le compteur de groupes pris en charge, la protection par code active/désactivée et la mise à jour immédiate de son état. Les tests de regroupement conservent chaque épisode dans le journal, une seule notification par chambre/type, la prise en charge groupée, la réactivation au nouveau bruit et la préservation d’un épisode arrivé après le clic de résolution.
 

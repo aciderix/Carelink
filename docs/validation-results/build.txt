@@ -1,4 +1,4 @@
-CareLink 2.2.0-debug
+CareLink 2.2.1-debug
 
 assembleDebug, testDebugUnitTest, assembleDebugAndroidTest et lintDebug : BUILD SUCCESSFUL.
 53 tests JVM réussis, aucun échec, erreur ou test ignoré.

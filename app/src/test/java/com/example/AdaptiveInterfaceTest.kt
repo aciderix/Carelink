@@ -64,6 +64,18 @@ class AdaptiveInterfaceTest {
         bitmap.recycle()
     }
 
+    private fun assertRoomHeadingAndPanelAlignment(secondaryTag: String) {
+        val heading = compose.onNodeWithTag("room_heading").assertIsDisplayed().getUnclippedBoundsInRoot()
+        val title = compose.onNodeWithTag("room_title").getUnclippedBoundsInRoot()
+        val status = compose.onNodeWithTag("room_status").getUnclippedBoundsInRoot()
+        val level = compose.onNodeWithTag("room_level").assertIsDisplayed().getUnclippedBoundsInRoot()
+        val secondary = compose.onNodeWithTag(secondaryTag).assertIsDisplayed().getUnclippedBoundsInRoot()
+        assertTrue(title.right < status.left)
+        assertEquals((title.top.value + title.bottom.value) / 2, (status.top.value + status.bottom.value) / 2, 1f)
+        assertTrue(level.top > heading.bottom)
+        assertEquals(level.top.value, secondary.top.value, 1f)
+    }
+
     @Test fun phoneHeaderKeepsMetricsBeforeTitleAndListUsesOneColumn() {
         dashboard()
         compose.onNodeWithTag("navigation_bar").assertIsDisplayed()
@@ -126,6 +138,7 @@ class AdaptiveInterfaceTest {
         val primary = compose.onNodeWithTag("room_primary").getUnclippedBoundsInRoot()
         val secondary = compose.onNodeWithTag("room_secondary").getUnclippedBoundsInRoot()
         assertTrue(secondary.left > primary.right)
+        assertRoomHeadingAndPanelAlignment("room_secondary")
         compose.onNodeWithText("Écouter").assertIsDisplayed()
         compose.onNodeWithText("Connexion").assertIsDisplayed()
         screenshot("room-tablet-landscape")
@@ -147,6 +160,7 @@ class AdaptiveInterfaceTest {
             }
         } }
         compose.onNodeWithTag("room_panels_split").assertExists()
+        assertRoomHeadingAndPanelAlignment("room_monitors")
         compose.onNodeWithText("Appairer un veilleur").assertIsDisplayed().assertIsEnabled()
         compose.onNodeWithText("Régler la sensibilité").assertIsDisplayed()
         compose.onNodeWithText("Adresse Wi-Fi", substring = true).assertDoesNotExist()

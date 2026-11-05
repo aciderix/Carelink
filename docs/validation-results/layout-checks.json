@@ -18,6 +18,7 @@
         "header metric order",
         "two room columns",
         "bedroom home split panels",
+        "shared inline room heading above aligned panels",
         "visible pairing and sensitivity"
       ]
     },
@@ -27,7 +28,8 @@
         "header metric order",
         "three room columns",
         "navigation rail",
-        "room details split panels"
+        "room details split panels",
+        "shared inline room heading above aligned panels"
       ]
     },
     {
