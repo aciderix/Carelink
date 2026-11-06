@@ -24,7 +24,9 @@ object ConnectionDiagnostic {
                 "Chambre injoignable à $address:9877. Gardez CareLink ouvert côté chambre. Vérifiez le Wi-Fi, le VPN et l’isolation des appareils sur le réseau invité."
             causes.any { it is EOFException } && enrolling ->
                 "Appairage non confirmé par la chambre. Gardez son QR ouvert ; s’il a expiré, générez-en un nouveau."
-            else -> "Connexion interrompue avec $address. Nouvelle tentative automatique ; vérifiez CareLink et le réseau côté chambre."
+            causes.any { it is IllegalStateException && it.message?.contains("Réseau local") == true } ->
+                "Ce poste ne détecte pas son adresse Wi-Fi locale. Désactivez puis réactivez le Wi-Fi, vérifiez qu’aucun VPN n’est actif, puis réessayez."
+            else -> "Connexion interrompue avec $address (${causes.last().javaClass.simpleName}). Nouvelle tentative automatique ; vérifiez CareLink et le réseau côté chambre."
         }
     }
 }

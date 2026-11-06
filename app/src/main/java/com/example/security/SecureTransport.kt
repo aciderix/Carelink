@@ -67,6 +67,8 @@ class SecureTransport(private val context: Context) {
     private val prefs = PreferencesManager(context)
     private fun identity(): KeyStore = synchronized(identityLock) {
         val store = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
+        // 32-bit Android 8 keystores could wrap far-future dates; an unusable identity is replaced, not kept forever.
+        if (store.containsAlias("carelink-tls-v2") && !usable(store.getCertificate("carelink-tls-v2") as? X509Certificate)) store.deleteEntry("carelink-tls-v2")
         if (!store.containsAlias("carelink-tls-v2")) {
             KeyPairGenerator.getInstance(KeyProperties.KEY_ALGORITHM_EC, "AndroidKeyStore").apply {
                 initialize(KeyGenParameterSpec.Builder("carelink-tls-v2", KeyProperties.PURPOSE_SIGN or KeyProperties.PURPOSE_VERIFY)
@@ -75,7 +77,7 @@ class SecureTransport(private val context: Context) {
                     .setDigests(KeyProperties.DIGEST_NONE, KeyProperties.DIGEST_SHA256, KeyProperties.DIGEST_SHA384)
                     .setCertificateSubject(X500Principal("CN=CareLink"))
                     .setCertificateSerialNumber(java.math.BigInteger(80, java.security.SecureRandom()))
-                    .setCertificateNotBefore(Date(1577836800000L)).setCertificateNotAfter(Date(4102444800000L)).build())
+                    .setCertificateNotBefore(Date(1577836800000L)).setCertificateNotAfter(Date(CERTIFICATE_NOT_AFTER)).build())
             }.generateKeyPair()
             store.load(null)
         }
@@ -112,11 +114,18 @@ class SecureTransport(private val context: Context) {
         require(room.address.isNotBlank()) { "Adresse de la chambre inconnue" }
         val ssl = SSLContext.getInstance("TLS").apply { init(null, arrayOf(PinnedTrustManager(PinnedTrustManager.decode(room.certificate))), null) }
         val loopback = room.address == "127.0.0.1" || room.address == "::1"
-        val raw = if (loopback) Socket() else (NetworkUtils.localNetwork(context)
-            ?: throw IllegalStateException("Réseau local Wi-Fi ou Ethernet indisponible")).socketFactory.createSocket()
+        val link = if (loopback) null else NetworkUtils.localLink(context)
+            ?: throw IllegalStateException("Réseau local Wi-Fi ou Ethernet indisponible")
+        var raw = link?.network?.socketFactory?.createSocket() ?: Socket()
         var socket: SSLSocket? = null
         try {
-            raw.connect(InetSocketAddress(room.address, port), 3500)
+            try { raw.connect(InetSocketAddress(room.address, port), 3500) }
+            catch (e: java.io.IOException) {
+                // Some OEM builds refuse sockets bound to a Network object: retry once on the default route.
+                if (link?.network == null || e is java.net.ConnectException || e is java.net.SocketTimeoutException) throw e
+                runCatching { raw.close() }
+                raw = Socket(); raw.connect(InetSocketAddress(room.address, port), 3500)
+            }
             socket = ssl.socketFactory.createSocket(raw, room.address, port, true) as SSLSocket
             socket.enabledProtocols = socket.supportedProtocols.filter { it == "TLSv1.2" || (android.os.Build.VERSION.SDK_INT >= 29 && it == "TLSv1.3") }.toTypedArray()
             socket.soTimeout = 6000; socket.tcpNoDelay = true; socket.sendBufferSize = 4096; socket.receiveBufferSize = 4096
@@ -130,5 +139,11 @@ class SecureTransport(private val context: Context) {
             return session
         } catch (e: Exception) { runCatching { socket?.close() }; runCatching { raw.close() }; throw e }
     }
-    companion object { private val identityLock = Any() }
+    companion object {
+        private val identityLock = Any()
+        /** 31 Dec 2037: stays below the 2038 limit of 32-bit time on older devices. */
+        const val CERTIFICATE_NOT_AFTER = 2145830400000L
+        /** Only an already expired identity (wrapped date) is replaced; a wrong clock in the past never discards a valid one. */
+        fun usable(certificate: X509Certificate?, now: Date = Date()): Boolean = certificate != null && certificate.notAfter.after(now)
+    }
 }

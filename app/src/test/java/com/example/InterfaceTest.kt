@@ -82,7 +82,8 @@ class InterfaceTest {
         compose.onNodeWithText("Accès professionnel").assertIsDisplayed()
         compose.onNode(hasSetTextAction()).performTextInput("123456")
         compose.onNodeWithText("Valider").performClick()
-        compose.waitUntil(10000) { !model.prefs.isRoleLocked }
+        compose.waitUntil(10000) { !model.prefs.isRoleLocked && !model.codeProtectionEnabled.value }
+        compose.waitForIdle()
         compose.onNode(hasScrollToIndexAction()).performScrollToNode(hasText("Protéger les actions par un code"))
         compose.onNodeWithText("Protéger les actions par un code").assertIsDisplayed()
         compose.onNodeWithText("Surveillance").performClick()

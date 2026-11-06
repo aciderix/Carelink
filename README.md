@@ -4,9 +4,9 @@ Application Android de détection sonore et de communication sur réseau local, 
 
 ## Télécharger l’application
 
-L’APK est inclus dans le dépôt : **[CareLink 2.4.0 — télécharger](downloads/CareLink-2.4.0.apk)**. Depuis GitHub, ouvrir le fichier puis utiliser **Download raw file**. Le bouton **Code → Download ZIP** récupère aussi les sources et l’APK. Cette version est signée avec une nouvelle clé : désinstaller l’ancienne CareLink avant de l’installer, puis refaire l’appairage (voir [downloads](downloads/README.md)).
+L’APK est inclus dans le dépôt : **[CareLink 2.4.1 — télécharger](downloads/CareLink-2.4.1.apk)**. Depuis GitHub, ouvrir le fichier puis utiliser **Download raw file**. Le bouton **Code → Download ZIP** récupère aussi les sources et l’APK. Elle s’installe par-dessus la 2.4.0 ; depuis la 2.3.0, désinstaller d’abord l’ancienne CareLink puis refaire l’appairage (voir [downloads](downloads/README.md)).
 
-- [Dossier de téléchargement](downloads/) et [empreinte SHA-256](downloads/CareLink-2.4.0.apk.sha256).
+- [Dossier de téléchargement](downloads/) et [empreinte SHA-256](downloads/CareLink-2.4.1.apk.sha256).
 - [Résultats de validation](docs/RESULTATS_VALIDATION.md) et [consignes de qualification](docs/VALIDATION.md).
 - [Aperçu de l’accueil](docs/screenshots/welcome.png) et [tableau de surveillance](docs/screenshots/monitor-empty.png), [tablette en paysage](docs/screenshots/monitor-tablet-landscape.png) et [fiche de chambre](docs/screenshots/room-tablet-landscape.png).
 
@@ -22,6 +22,14 @@ Sur Android, autoriser l’installation depuis la source utilisée pour téléch
 - Contrôles de fraîcheur, capture rendue silencieuse, silence numérique prolongé, erreurs et saturation. Le test de transmission ne prétend pas vérifier le microphone.
 - Interface sombre ou claire, navigation Surveillance / Événements / Réglages, protection optionnelle des actions sensibles par code et notifications sans acquittement accidentel depuis l’écran verrouillé.
 - Pas de SDK Firebase, pas de service cloud applicatif et pas d’enregistrement audio conservé.
+
+## Version 2.4.1 : compatibilité Android 8 (tablettes anciennes)
+
+- Détection de l’adresse Wi-Fi locale plus robuste. Avant, seul le premier réseau Wi-Fi annoncé par Android était examiné ; sur certaines tablettes (Galaxy Tab A 2016, Android 8), il n’avait pas d’adresse ou n’était pas trouvé. Résultat : « Connectez ce téléphone au Wi-Fi » en mode chambre et « Connexion interrompue » en mode veilleur. CareLink retient maintenant le premier réseau Wi-Fi/Ethernet qui porte réellement une adresse IPv4, puis se replie sur la liste des interfaces et sur le gestionnaire Wi-Fi. Les réseaux mobiles, VPN et Wi-Fi Direct restent exclus.
+- Si Android refuse une connexion attachée au réseau Wi-Fi, une seconde tentative passe par la route par défaut du réseau local.
+- Certificat de sécurité des nouvelles installations limité au 31/12/2037 (limite des systèmes 32 bits) ; une identité dont la date a été corrompue est régénérée.
+- Messages de connexion plus précis (adresse Wi-Fi introuvable, type d’erreur).
+- Tests d’interface et de réseau exécutés aussi en émulation Android 8 (API 26).
 
 ## Version 2.4.0 : nouveau design et ergonomie
 

@@ -12,8 +12,8 @@ android {
     applicationId = "com.aistudio.cradlelink.vxrtw"
     minSdk = 24
     targetSdk = 36
-    versionCode = 10
-    versionName = "2.4.0"
+    versionCode = 11
+    versionName = "2.4.1"
     manifestPlaceholders["appLabel"] = "CareLink"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
