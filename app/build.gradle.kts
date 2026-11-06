@@ -48,8 +48,7 @@ android {
     }
     debug {
       applicationIdSuffix = ".debug"
-      versionNameSuffix = "-debug"
-      manifestPlaceholders["appLabel"] = "CareLink · Essai"
+      manifestPlaceholders["appLabel"] = "CareLink"
       // Do not remove or modify this signingConfig assignment. It is necessary for Android apps in
       // AI Studio.
       signingConfig = signingConfigs.getByName("debugConfig")

@@ -2,15 +2,15 @@
 
 Application Android de détection sonore et de communication sur réseau local, en complément des procédures humaines. Deux rôles : **chambre** (capture et événements) et **veilleur** (appareils attendus, événements, écoute et interphone).
 
-## Télécharger la version d’essai
+## Télécharger l’application
 
-L’APK 2.3.0 ci-dessous précède la refonte 2.4.0 ; reconstruire l’APK 2.4.0 avec la clé de développement habituelle pour conserver la mise à jour sur les téléphones déjà équipés. L’APK d’essai est inclus dans cette branche : **[CareLink 2.3.0-debug — télécharger](https://github.com/aciderix/Carelink/raw/refs/heads/carelink-v2-ameliorations-apk/downloads/CareLink-2.3.0-debug.apk)**. Depuis GitHub, ouvrir le fichier puis utiliser **Download raw file** si nécessaire. Le bouton **Code → Download ZIP** récupère aussi les sources et l’APK.
+L’APK est inclus dans le dépôt : **[CareLink 2.4.0 — télécharger](downloads/CareLink-2.4.0.apk)**. Depuis GitHub, ouvrir le fichier puis utiliser **Download raw file**. Le bouton **Code → Download ZIP** récupère aussi les sources et l’APK. Cette version est signée avec une nouvelle clé : désinstaller l’ancienne CareLink avant de l’installer, puis refaire l’appairage (voir [downloads](downloads/README.md)).
 
-- [Dossier de téléchargement](downloads/) et [empreinte SHA-256](downloads/CareLink-2.3.0-debug.apk.sha256).
+- [Dossier de téléchargement](downloads/) et [empreinte SHA-256](downloads/CareLink-2.4.0.apk.sha256).
 - [Résultats de validation](docs/RESULTATS_VALIDATION.md) et [consignes de qualification](docs/VALIDATION.md).
 - [Aperçu de l’accueil](docs/screenshots/welcome.png) et [tableau de surveillance](docs/screenshots/monitor-empty.png), [tablette en paysage](docs/screenshots/monitor-tablet-landscape.png) et [fiche de chambre](docs/screenshots/room-tablet-landscape.png).
 
-Il s’agit d’une version d’essai distincte de l’application de production. Sur Android, autoriser l’installation depuis la source utilisée pour télécharger l’APK. Consulter les étapes d’appairage ci-dessous et effectuer les essais sur les téléphones prévus avant utilisation en établissement.
+Sur Android, autoriser l’installation depuis la source utilisée pour télécharger l’APK. Consulter les étapes d’appairage ci-dessous et effectuer les essais sur les téléphones prévus avant utilisation en établissement.
 
 ## Ce qui change
 
@@ -136,6 +136,6 @@ JDK 21, Android SDK 36.1, build-tools 36.0.0 et Gradle 9.3.1. Avec le wrapper :
 
 Dans l’environnement cloud préparé : `source /workspace/.carelink-tools/env.sh`. Ne pas désactiver la vérification TLS du proxy. Le script Gradle local de cet environnement transmet le proxy aux tests Robolectric.
 
-Le build debug est une application distincte (`.debug`, « CareLink · Essai »). Arrêtez l’ancienne application avant les essais : deux serveurs chambre ne peuvent pas partager les mêmes ports sur un téléphone. Le build debug utilise une clé de développement ignorée par Git ; il n’est pas un livrable de production. Pour une livraison release, fournir `KEYSTORE_PATH`, `STORE_PASSWORD`, `KEY_PASSWORD` et la clé `upload` via le mécanisme sécurisé prévu, puis vérifier signature, manifeste et version. Ne jamais ajouter ces valeurs au dépôt. Aucun secret serveur ne doit être compilé dans l’APK.
+Le build debug (identifiant `.debug`) s’affiche désormais simplement « CareLink ». Arrêtez l’ancienne application avant les essais : deux serveurs chambre ne peuvent pas partager les mêmes ports sur un téléphone. Le build debug utilise une clé de développement ignorée par Git ; il n’est pas un livrable de production. Pour une livraison release, fournir `KEYSTORE_PATH`, `STORE_PASSWORD`, `KEY_PASSWORD` et la clé `upload` via le mécanisme sécurisé prévu, puis vérifier signature, manifeste et version. Ne jamais ajouter ces valeurs au dépôt. Aucun secret serveur ne doit être compilé dans l’APK.
 
 Voir [qualification technique et opérationnelle](docs/VALIDATION.md) avant un pilote auprès des résidents.
