@@ -1,4 +1,21 @@
-# Résultats de validation de CareLink 2.3.0-debug
+# Résultats de validation de CareLink 2.4.0-debug
+
+Vérifications locales effectuées le 6 novembre 2026, après la refonte visuelle.
+
+| Vérification | Résultat |
+| --- | --- |
+| Compilation de l’APK et de l’application de test | Réussite |
+| Tests JVM / Robolectric | 67 réussis, aucun échec ni test ignoré (62 avant la refonte, tous réussis sur la version 2.3.0) |
+| Compilation des tests instrumentés | Réussite |
+| Analyse Android Lint | 0 erreur ; avertissements non bloquants |
+| Exécution instrumentée sur appareil | Non réalisée (aucun émulateur disponible) |
+| Signature | APK local signé avec une clé de test, non publié ; l’APK du dossier `downloads` reste la 2.3.0 |
+
+Nouveaux contrôles : confirmation avant résolution depuis le tableau, vue d’ensemble au-dessus des chambres, absence d’engrenage en double, tri par urgence puis tri naturel, rendu des thèmes sombre et clair, liste d’événements groupés, verrou de l’incident microphone tant qu’il n’est pas pris en charge, délai croissant après codes erronés. Les captures sont dans [screenshots](screenshots/).
+
+---
+
+## Historique : CareLink 2.3.0-debug
 
 Vérifications locales effectuées le 5 novembre 2026.
 

@@ -4,7 +4,7 @@ Application Android de détection sonore et de communication sur réseau local, 
 
 ## Télécharger la version d’essai
 
-L’APK d’essai est inclus dans cette branche : **[CareLink 2.3.0-debug — télécharger](https://github.com/aciderix/Carelink/raw/refs/heads/carelink-v2-ameliorations-apk/downloads/CareLink-2.3.0-debug.apk)**. Depuis GitHub, ouvrir le fichier puis utiliser **Download raw file** si nécessaire. Le bouton **Code → Download ZIP** récupère aussi les sources et l’APK.
+L’APK 2.3.0 ci-dessous précède la refonte 2.4.0 ; reconstruire l’APK 2.4.0 avec la clé de développement habituelle pour conserver la mise à jour sur les téléphones déjà équipés. L’APK d’essai est inclus dans cette branche : **[CareLink 2.3.0-debug — télécharger](https://github.com/aciderix/Carelink/raw/refs/heads/carelink-v2-ameliorations-apk/downloads/CareLink-2.3.0-debug.apk)**. Depuis GitHub, ouvrir le fichier puis utiliser **Download raw file** si nécessaire. Le bouton **Code → Download ZIP** récupère aussi les sources et l’APK.
 
 - [Dossier de téléchargement](downloads/) et [empreinte SHA-256](downloads/CareLink-2.3.0-debug.apk.sha256).
 - [Résultats de validation](docs/RESULTATS_VALIDATION.md) et [consignes de qualification](docs/VALIDATION.md).
@@ -20,8 +20,35 @@ Il s’agit d’une version d’essai distincte de l’application de production
 - Chambre attendue conservée après redémarrage du veilleur. Capture récente, état réseau et incidents affichés séparément.
 - Services au premier plan indépendants des activités ; aucun type `dataSync` pour la permanence. Retour Android ne désarme plus la surveillance.
 - Contrôles de fraîcheur, capture rendue silencieuse, silence numérique prolongé, erreurs et saturation. Le test de transmission ne prétend pas vérifier le microphone.
-- Interface sombre, navigation Surveillance / Événements / Réglages, protection optionnelle des actions sensibles par code et notifications sans acquittement accidentel depuis l’écran verrouillé.
+- Interface sombre ou claire, navigation Surveillance / Événements / Réglages, protection optionnelle des actions sensibles par code et notifications sans acquittement accidentel depuis l’écran verrouillé.
 - Pas de SDK Firebase, pas de service cloud applicatif et pas d’enregistrement audio conservé.
+
+## Version 2.4.0 : nouveau design et ergonomie
+
+**Interface**
+
+- Nouveau système visuel sobre : surfaces graphite neutres, un seul accent bleu, couleurs d’état réservées au sens (vert normal, ambre attention, rouge critique, orange pause). Coins resserrés, bordures fines, liseré d’état sur les fiches, chiffres tabulaires.
+- Thème **Sombre** (par défaut, pour la nuit), **Clair** ou **Système**, au choix dans **Réglages → Affichage**.
+- En-tête simplifié : logo, nom du rôle et bouton **Pause / Reprendre** libellé. L’engrenage en double avec l’onglet **Réglages** est retiré.
+- La surveillance s’ouvre sur une **vue d’ensemble** lisible sans toucher : *Captures récentes*, *À vérifier*, *Hors ligne*. Les badges d’icônes de l’en-tête disparaissent.
+- Fiches de chambre : point et libellé d’état, type d’événement en cours, jauge de niveau avec repère du seuil, batterie faible signalée. Le bouton d’action est écrit en toutes lettres (**Prendre en charge**, **Résoudre**, **En attente**).
+- Tri naturel des chambres (Chambre 2 avant Chambre 10), après le tri par urgence.
+- Événements : sélecteur *En cours / Résolus*, icône par type, historique indiquant l’heure de résolution.
+- Réglages regroupés en sections : Poste / Chambre, Alertes, Affichage, Sécurité, Maintenance.
+- Ajout de chambre guidé en trois étapes ; QR d’appairage avec compte à rebours visuel.
+
+**Ergonomie et fiabilité**
+
+- La résolution depuis le tableau de surveillance demande désormais une confirmation (un appui involontaire ne clôture plus les alertes d’une chambre).
+- Sans protection par code, ouvrir les réglages ou l’écran d’ajout ne demande plus de confirmation ; les actions réelles (révocation, retrait, test, seuil, arrêt) restent confirmées.
+- Code professionnel : quatre essais libres, puis attente croissante de 30 s à 15 min, mémorisée même si l’application est fermée.
+- Un microphone instable ne remplit plus le journal : un seul incident de capture « à vérifier » à la fois par chambre ; une nouvelle alerte n’est créée qu’après prise en charge.
+- Une notification ouvre la chambre concernée sans recréer l’écran (plus de clignotement ni d’annulation d’un appairage en cours).
+- Retour Android depuis Événements ou Réglages revient à la surveillance au lieu de quitter l’application.
+- Fin automatique de l’interphone après 30 s : le service retire aussi son type « microphone ».
+- Le message de fin d’appairage distingue un code utilisé d’un QR expiré.
+
+Captures : [tableau sombre](docs/screenshots/design-dashboard-dark.png), [tableau clair](docs/screenshots/design-dashboard-light.png), [événements](docs/screenshots/design-events.png), [réglages](docs/screenshots/settings-monitor.png), [accueil](docs/screenshots/welcome.png), [chambre sur tablette](docs/screenshots/room-tablet-landscape.png).
 
 ## Pause du veilleur dans la version 2.3.0
 

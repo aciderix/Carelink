@@ -11,7 +11,7 @@ import com.example.model.*
 import com.example.service.MonitorMonitoringService.MonitorServiceState
 import com.example.service.RoomMonitoringService.RoomServiceState
 import com.example.ui.*
-import com.example.ui.theme.MyApplicationTheme
+import com.example.ui.theme.CareLinkTheme
 import java.io.File
 import org.junit.Assert.*
 import org.junit.Rule
@@ -33,24 +33,29 @@ class AdaptiveInterfaceTest {
     private fun dashboard() {
         val rooms = (1..12).map { room.copy(id = "room-$it", name = "Chambre %02d".format(it)) }
         val state = MonitorServiceState(isRunning = true, monitoredRooms = rooms)
-        compose.setContent { MyApplicationTheme {
-            CareLinkScaffold(DeviceRole.MONITOR_UNIT, state, 0, true, settings = {}, navigate = {}) {
+        compose.setContent { CareLinkTheme {
+            CareLinkScaffold(DeviceRole.MONITOR_UNIT, state, 0, true, navigate = {}) {
                 MonitorDashboard(it.fillMaxSize(), state, {}, {}, { _, _ -> }, {})
             }
         } }
+        val overview = compose.onNodeWithTag("overview").assertIsDisplayed().getUnclippedBoundsInRoot()
         val recent = compose.onNodeWithContentDescription("Captures récentes").assertIsDisplayed().getUnclippedBoundsInRoot()
         val attention = compose.onNodeWithContentDescription("À vérifier").assertIsDisplayed().getUnclippedBoundsInRoot()
-        val title = compose.onNodeWithTag("header_title").assertIsDisplayed().getUnclippedBoundsInRoot()
+        val offline = compose.onNodeWithContentDescription("Hors ligne").assertIsDisplayed().getUnclippedBoundsInRoot()
         assertTrue(recent.right <= attention.left)
-        assertTrue(attention.right <= title.left)
-        compose.onNodeWithContentDescription("Réglages et diagnostic").assertIsDisplayed()
+        assertTrue(attention.right <= offline.left)
+        val title = compose.onNodeWithTag("header_title").assertIsDisplayed().getUnclippedBoundsInRoot()
+        assertTrue(overview.top >= title.bottom)
+        assertTrue(compose.onNodeWithText("Chambre 01").getUnclippedBoundsInRoot().top > overview.bottom)
+        // Settings are reached through the navigation only: no duplicate gear in the header.
+        compose.onNodeWithContentDescription("Réglages et diagnostic").assertDoesNotExist()
     }
 
     private fun detail(offline: Boolean = false) {
         val current = if (offline) room.copy(status = RoomStatus.DISCONNECTED, isMicOperational = false, diagnostic = "Connexion interrompue") else room
         val state = MonitorServiceState(isRunning = true, monitoredRooms = listOf(current))
-        compose.setContent { MyApplicationTheme {
-            CareLinkScaffold(DeviceRole.MONITOR_UNIT, state, 0, true, back = {}, settings = {}, navigate = {}) {
+        compose.setContent { CareLinkTheme {
+            CareLinkScaffold(DeviceRole.MONITOR_UNIT, state, 0, true, back = {}, navigate = {}) {
                 RoomDetailPanel(it.fillMaxSize(), current, state, {}, {}, {}, { _, _ -> }, {}, {}, {}, {})
             }
         } }
@@ -76,7 +81,7 @@ class AdaptiveInterfaceTest {
         assertEquals(level.top.value, secondary.top.value, 1f)
     }
 
-    @Test fun phoneHeaderKeepsMetricsBeforeTitleAndListUsesOneColumn() {
+    @Test fun phoneShowsOverviewAboveASingleColumnOfRooms() {
         dashboard()
         compose.onNodeWithTag("navigation_bar").assertIsDisplayed()
         compose.onNodeWithTag("navigation_rail").assertDoesNotExist()
@@ -122,13 +127,13 @@ class AdaptiveInterfaceTest {
         compose.onNodeWithTag("room_panels_single").assertExists()
         compose.onNodeWithText("Écouter").assertIsDisplayed()
         compose.onNodeWithText("Interphone").assertIsDisplayed()
-        compose.onNodeWithText("Batterie : 83%").assertDoesNotExist()
+        compose.onNodeWithText("83 %").assertDoesNotExist()
         compose.onNodeWithText("Appliquer le réglage").assertDoesNotExist()
         screenshot("room-phone")
         compose.onNodeWithText("Sensibilité").performClick()
         compose.onNodeWithText("Appliquer le réglage").performScrollTo().assertIsNotEnabled()
         compose.onNodeWithText("Informations de l’appareil").performScrollTo().performClick()
-        compose.onNodeWithText("Batterie : 83%").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("83 %").performScrollTo().assertIsDisplayed()
     }
 
     @Test @Config(qualifiers = "w1280dp-h800dp-land-mdpi")
@@ -153,8 +158,8 @@ class AdaptiveInterfaceTest {
 
     @Test @Config(qualifiers = "w800dp-h1280dp-port-mdpi")
     fun tabletBedroomHomeKeepsPairingAndSensitivityVisible() {
-        compose.setContent { MyApplicationTheme {
-            CareLinkScaffold(DeviceRole.ROOM_UNIT, MonitorServiceState(), 0, true, settings = {}, navigate = {}) {
+        compose.setContent { CareLinkTheme {
+            CareLinkScaffold(DeviceRole.ROOM_UNIT, MonitorServiceState(), 0, true, navigate = {}) {
                 RoomHomePanel(it.fillMaxSize(), RoomServiceState(isRunning = true, roomName = "Chambre 12", status = RoomStatus.CALM,
                     isMicOperational = true, currentDecibels = 37, connectedMonitors = 2), "Chambre", {}, {}, {})
             }

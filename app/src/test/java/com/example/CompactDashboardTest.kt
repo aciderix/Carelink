@@ -15,7 +15,7 @@ import com.example.service.MonitorMonitoringService.MonitorServiceState
 import com.example.ui.MonitorDashboard
 import com.example.ui.CareLinkScaffold
 import com.example.ui.EventNavigationIcon
-import com.example.ui.theme.MyApplicationTheme
+import com.example.ui.theme.CareLinkTheme
 import org.junit.*
 import org.junit.Assert.*
 import org.junit.runner.RunWith
@@ -34,7 +34,7 @@ class CompactDashboardTest {
         roomName = room.name, timestamp = 1000, eventType = AlertEventType.SOUND_ALERT, isAcknowledged = ack)
     @Composable private fun Dashboard(modifier: Modifier, state: MonitorServiceState, add: () -> Unit, select: (String) -> Unit,
         eventAction: (List<RoomAlertEvent>, Boolean) -> Unit, resume: () -> Unit) {
-        CareLinkScaffold(DeviceRole.MONITOR_UNIT, state, 0, true, settings = {}, navigate = {}) {
+        CareLinkScaffold(DeviceRole.MONITOR_UNIT, state, 0, true, navigate = {}) {
             MonitorDashboard(modifier, state, add, select, eventAction, resume)
         }
     }
@@ -43,7 +43,7 @@ class CompactDashboardTest {
         val calls = mutableListOf<Pair<List<String>, Boolean>>()
         var opened = false
         compose.setContent {
-            MyApplicationTheme {
+            CareLinkTheme {
                 Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
                     Dashboard(Modifier.fillMaxSize(), MonitorServiceState(isRunning = true, monitoredRooms = listOf(room,
                         room.copy(id = "room-14", name = "Chambre 14"), room.copy(id = "room-16", name = "Chambre 16", status = RoomStatus.DISCONNECTED, isMicOperational = false)), activeAlerts = active.value),
@@ -66,18 +66,22 @@ class CompactDashboardTest {
         compose.runOnIdle { active.value = listOf(event("one", true), event("two", true)) }
         compose.onNodeWithText("Pris en charge").assertIsDisplayed()
         compose.onNodeWithContentDescription("Résoudre les alertes de Chambre 12").performClick()
+        // Resolution is never a single accidental tap: it asks for confirmation first.
+        assertEquals(1, calls.size)
+        compose.onNodeWithText("Confirmer la résolution").performClick()
+        assertEquals(listOf("one", "two"), calls.last().first)
         assertTrue(calls.last().second)
         assertFalse(opened)
     }
     @Test fun compactMetricsExplainTheirMeaningOnTap() {
-        compose.setContent { MyApplicationTheme {
+        compose.setContent { CareLinkTheme {
             Dashboard(Modifier.fillMaxSize(), MonitorServiceState(isRunning = true, monitoredRooms = listOf(room)), {}, {}, { _, _ -> }, {})
         } }
         compose.onNodeWithContentDescription("Captures récentes").performClick()
         compose.onNodeWithText("Captures récentes : 1 sur 1 chambres. Le microphone transmet des échantillons récents.").assertIsDisplayed()
     }
     @Test fun roomDetailsAppearOnLongPress() {
-        compose.setContent { MyApplicationTheme {
+        compose.setContent { CareLinkTheme {
             Dashboard(Modifier.fillMaxSize(), MonitorServiceState(isRunning = true, monitoredRooms = listOf(room)), {}, {}, { _, _ -> }, {})
         } }
         compose.onNodeWithText("Batterie : 83%", substring = true).assertDoesNotExist()
@@ -86,7 +90,7 @@ class CompactDashboardTest {
     }
     @Test fun eventBadgeCountsActiveGroupsIncludingAcknowledgedGroups() {
         val grouped = AlertGroup.active(listOf(event("one", true), event("two", true)))
-        compose.setContent { MyApplicationTheme { EventNavigationIcon(grouped.size) } }
+        compose.setContent { CareLinkTheme { EventNavigationIcon(grouped.size) } }
         compose.onNodeWithContentDescription("Événements en cours : 1").assertIsDisplayed()
     }
 }

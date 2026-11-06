@@ -107,4 +107,12 @@ class EventStoreTest {
         assertFalse(store.get("monitor", "sound")!!.resolved)
         assertFalse(store.all("monitor").single { it.eventType == AlertEventType.MIC_ERROR }.resolved)
     }
+    @Test fun captureIncidentLatchesUntilAcknowledged() {
+        assertFalse(store.hasUncheckedEvent("room", AlertEventType.MIC_ERROR))
+        store.put("room", event("mic").copy(eventType = AlertEventType.MIC_ERROR))
+        assertTrue(store.hasUncheckedEvent("room", AlertEventType.MIC_ERROR))
+        assertFalse(store.hasUncheckedEvent("room", AlertEventType.SOUND_ALERT))
+        store.transition("room", "mic", "night-team", false)
+        assertFalse(store.hasUncheckedEvent("room", AlertEventType.MIC_ERROR))
+    }
 }

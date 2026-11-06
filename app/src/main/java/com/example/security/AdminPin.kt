@@ -21,3 +21,10 @@ object AdminPin {
         return try { SecretKeyFactory.getInstance("PBKDF2WithHmacSHA1").generateSecret(spec).encoded } finally { spec.clearPassword() }
     }
 }
+
+/** Escalating delay against guessing the professional code: free retries first, then 30 s doubling up to 15 min. */
+object PinThrottle {
+    const val FREE_ATTEMPTS = 4
+    fun lockoutMs(failures: Int): Long =
+        if (failures <= FREE_ATTEMPTS) 0L else minOf(30_000L shl minOf(failures - FREE_ATTEMPTS - 1, 5), 15 * 60_000L)
+}

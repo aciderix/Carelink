@@ -118,7 +118,8 @@ class RoomMonitoringService : Service() {
                         prefs.defaultSensitivityDb, status, capture.isOperational, error, talking,
                         localServer.connectedMonitors, capture.captureAgeMs, capture.samplesCaptured,
                         NetworkUtils.getLocalIpAddress(this@RoomMonitoringService), connectionDiagnostic)
-                    if (error != null && error != lastError && !talking) {
+                    // A flapping microphone must not flood the journal: one unchecked capture incident at a time.
+                    if (error != null && error != lastError && !talking && !store.hasUncheckedEvent("room", AlertEventType.MIC_ERROR)) {
                         store.put("room", RoomAlertEvent(roomId = prefs.installationId, roomName = prefs.roomName,
                             eventType = AlertEventType.MIC_ERROR, notes = error, remote = true))
                     }

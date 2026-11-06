@@ -3,6 +3,7 @@ package com.example.data
 import android.content.Context
 import android.content.SharedPreferences
 import com.example.model.DeviceRole
+import com.example.model.ThemeMode
 import java.util.UUID
 
 class PreferencesManager(context: Context) {
@@ -75,6 +76,16 @@ class PreferencesManager(context: Context) {
     var pinHash: String
         get() = prefs.getString("admin_pin", "") ?: ""
         set(value) = prefs.edit().putString("admin_pin", value).apply()
+    var themeMode: ThemeMode
+        get() = runCatching { ThemeMode.valueOf(prefs.getString("theme_mode", ThemeMode.DARK.name)!!) }.getOrDefault(ThemeMode.DARK)
+        set(value) = prefs.edit().putString("theme_mode", value.name).apply()
+    /** Consecutive wrong professional codes, persisted so that closing the app does not reset the delay. */
+    var pinFailures: Int
+        get() = prefs.getInt("pin_failures", 0)
+        set(value) = prefs.edit().putInt("pin_failures", value.coerceAtLeast(0)).apply()
+    var pinLockedUntil: Long
+        get() = prefs.getLong("pin_locked_until", 0L)
+        set(value) = prefs.edit().putLong("pin_locked_until", value).apply()
     companion object { private val identityLock = Any() }
 
     fun getThresholdForRoom(roomId: String): Int {

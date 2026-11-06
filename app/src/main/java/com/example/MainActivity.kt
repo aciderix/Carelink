@@ -15,7 +15,9 @@ import androidx.core.content.ContextCompat
 import com.example.model.DeviceRole
 import com.example.ui.CareLinkApp
 import com.example.ui.MainViewModel
-import com.example.ui.theme.MyApplicationTheme
+import com.example.ui.theme.CareLinkTheme
+import androidx.compose.runtime.getValue
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 
 class MainActivity : ComponentActivity() {
     private val model: MainViewModel by viewModels()
@@ -35,8 +37,10 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState); enableEdgeToEdge()
         window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+        if (savedInstanceState == null) model.openRoomRequest.value = intent.getStringExtra("selected_room_id")
         setContent {
-            MyApplicationTheme {
+            val theme by model.themeMode.collectAsStateWithLifecycle()
+            CareLinkTheme(theme) {
                 CareLinkApp(model,
                     startRole = { role ->
                         if (role == DeviceRole.ROOM_UNIT) withMicrophone { model.start(role); requestNotifications() }
@@ -44,7 +48,7 @@ class MainActivity : ComponentActivity() {
                     }, requestMicrophone = { action -> withMicrophone(action) }, requestCamera = { action ->
                         if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) action()
                         else { cameraAction = action; cameraPermission.launch(Manifest.permission.CAMERA) }
-                    }, openRoom = intent.getStringExtra("selected_room_id"))
+                    })
             }
         }
     }
@@ -58,5 +62,9 @@ class MainActivity : ComponentActivity() {
         if (Build.VERSION.SDK_INT >= 33 && ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED)
             notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
     }
-    override fun onNewIntent(intent: Intent) { super.onNewIntent(intent); setIntent(intent); recreate() }
+    // Notification taps open the room in place, without recreating the activity.
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent); setIntent(intent)
+        intent.getStringExtra("selected_room_id")?.let { model.openRoomRequest.value = it }
+    }
 }

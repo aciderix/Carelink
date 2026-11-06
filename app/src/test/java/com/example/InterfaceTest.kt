@@ -51,15 +51,17 @@ class InterfaceTest {
                 prefs.pinHash = hash; setCodeProtection(false)
             }
         }
-        compose.onAllNodesWithText("Utiliser ce mode")[0].performClick()
+        compose.onNodeWithText("Utiliser comme poste veilleur").performClick()
         compose.onNodeWithContentDescription("Captures récentes").assertIsDisplayed()
-        compose.onNodeWithText("Aucune chambre appairée. Ajoutez les téléphones attendus avant votre prise de poste.").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Aucune chambre appairée").performScrollTo().assertIsDisplayed()
         screenshot("monitor-empty")
         compose.onNodeWithText("Ajouter une chambre").performScrollTo().assertIsDisplayed()
         compose.onNodeWithText("Ajouter une chambre").performClick()
+        // Opening a screen is navigation: without code protection it needs neither code nor confirmation.
         compose.onNodeWithText("Code professionnel").assertDoesNotExist()
-        compose.onNodeWithText("Confirmer").performClick()
+        compose.onNodeWithText("Confirmer").assertDoesNotExist()
         compose.onNodeWithText("Scanner le QR").assertIsDisplayed()
+        screenshot("add-room")
     }
     @Test fun disablingCodeInSettingsUpdatesTheButtonAndRemovesEnrollmentPinRequests() {
         val hash = AdminPin.hash("123456")
@@ -68,12 +70,13 @@ class InterfaceTest {
             model = ViewModelProvider(compose.activity)[MainViewModel::class.java]
             model.prefs.pinHash = hash; model.setCodeProtection(true)
         }
-        compose.onAllNodesWithText("Utiliser ce mode")[0].performClick()
+        compose.onNodeWithText("Utiliser comme poste veilleur").performClick()
         compose.onNodeWithText("Réglages").performClick()
         compose.onNodeWithText("Accès professionnel").assertIsDisplayed()
         compose.onNode(hasSetTextAction()).performTextInput("123456")
         compose.onNodeWithText("Valider").performClick()
         compose.waitUntil(10000) { compose.onAllNodesWithText("Réglages du poste").fetchSemanticsNodes().isNotEmpty() }
+        screenshot("settings-monitor")
         compose.onNode(hasScrollToIndexAction()).performScrollToNode(hasText("Désactiver la protection par code"))
         compose.onNodeWithText("Désactiver la protection par code").performClick()
         compose.onNodeWithText("Accès professionnel").assertIsDisplayed()
@@ -85,7 +88,6 @@ class InterfaceTest {
         compose.onNodeWithText("Surveillance").performClick()
         compose.onNodeWithText("Ajouter une chambre").performScrollTo().performClick()
         compose.onNodeWithText("Code professionnel").assertDoesNotExist()
-        compose.onNodeWithText("Confirmer").performClick()
         compose.onNodeWithText("Scanner le QR").assertIsDisplayed()
     }
 }

@@ -129,7 +129,7 @@ class MonitorMonitoringService : Service() {
                         withContext(Dispatchers.Main) { foreground(true) }
                         client?.startSpeaking(id)
                         talkDeadline?.cancel()
-                        talkDeadline = scope.launch { delay(30000); client?.stopSpeaking() }
+                        talkDeadline = scope.launch { delay(30000); client?.stopSpeaking(); withContext(Dispatchers.Main) { foreground() } }
                     }
                     ACTION_STOP_TALK -> { talkDeadline?.cancel(); client?.stopSpeaking(); withContext(Dispatchers.Main) { foreground() } }
                     ACTION_SET_THRESHOLD -> if (id != null) {

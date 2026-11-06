@@ -66,6 +66,9 @@ class EventStore(context: Context) : SQLiteOpenHelper(context.applicationContext
         }, SQLiteDatabase.CONFLICT_REPLACE)
         check(result != -1L) { "Journal indisponible" }; return previous == null
     }
+    /** True while an event of this kind is still waiting for a first acknowledgement. */
+    @Synchronized fun hasUncheckedEvent(side: String, kind: AlertEventType): Boolean =
+        all(side).any { it.eventType == kind && !it.resolved && !it.isAcknowledged }
     @Synchronized fun get(side: String, id: String): RoomAlertEvent? =
         readableDatabase.rawQuery("SELECT body FROM events WHERE side=? AND id=?", arrayOf(side, id)).use {
             if (it.moveToFirst()) RoomAlertEvent.fromJson(org.json.JSONObject(it.getString(0))) else null

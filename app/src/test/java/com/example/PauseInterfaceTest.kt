@@ -13,7 +13,7 @@ import androidx.compose.ui.unit.Density
 import com.example.model.*
 import com.example.service.MonitorMonitoringService.MonitorServiceState
 import com.example.ui.*
-import com.example.ui.theme.MyApplicationTheme
+import com.example.ui.theme.CareLinkTheme
 import java.io.File
 import org.junit.*
 import org.junit.Assert.*
@@ -31,27 +31,28 @@ class PauseInterfaceTest {
     private val room = RoomUnitState("room", "Chambre 12", "192.168.1.12", status = RoomStatus.CALM, isMicOperational = true)
     private fun screen(paused: Boolean = false, back: Boolean = false, fontScale: Float = 1f) {
         val state = mutableStateOf(MonitorServiceState(isRunning = true, isPaused = paused, monitoredRooms = listOf(room)))
-        compose.setContent { MyApplicationTheme {
+        compose.setContent { CareLinkTheme {
             val density = LocalDensity.current
             CompositionLocalProvider(LocalDensity provides Density(density.density, fontScale)) {
                 CareLinkScaffold(DeviceRole.MONITOR_UNIT, state.value, 0, true, back = if (back) ({}) else null,
-                    settings = {}, pause = { calls.add(it); state.value = state.value.copy(isPaused = it) }, navigate = {}) {
+                    pause = { calls.add(it); state.value = state.value.copy(isPaused = it) }, navigate = {}) {
                     if (back) RoomDetailPanel(it.fillMaxSize(), room, state.value, {}, {}, {}, { _, _ -> }, {}, {}, {}, {})
                     else MonitorDashboard(it.fillMaxSize(), state.value, {}, {}, { _, _ -> }, {})
                 }
             }
         } }
     }
-    private fun assertControls(label: String) {
+    private fun assertControls(label: String, dashboard: Boolean = true) {
         val pause = compose.onNodeWithContentDescription(label).assertIsDisplayed().getUnclippedBoundsInRoot()
-        val settings = compose.onNodeWithContentDescription("Réglages et diagnostic").assertIsDisplayed().getUnclippedBoundsInRoot()
-        assertTrue(pause.right <= settings.left)
-        assertEquals((pause.top.value + pause.bottom.value) / 2, (settings.top.value + settings.bottom.value) / 2, 1f)
         val title = compose.onNodeWithTag("header_title").getUnclippedBoundsInRoot()
+        assertTrue(title.right <= pause.left)
+        assertEquals((pause.top.value + pause.bottom.value) / 2, (title.top.value + title.bottom.value) / 2, 1f)
         assertTrue(title.right.value - title.left.value >= 110f)
         compose.onNodeWithText("CareLink").assertIsDisplayed()
-        compose.onNodeWithContentDescription("Captures récentes").assertIsDisplayed()
-        compose.onNodeWithContentDescription("À vérifier").assertIsDisplayed()
+        if (dashboard) {
+            compose.onNodeWithContentDescription("Captures récentes").assertIsDisplayed()
+            compose.onNodeWithContentDescription("À vérifier").assertIsDisplayed()
+        }
     }
     private fun screenshot(name: String) = compose.runOnIdle {
         val view = compose.activity.window.decorView
@@ -61,7 +62,7 @@ class PauseInterfaceTest {
         bitmap.recycle()
     }
 
-    @Test fun pauseAndResumeStayBesideSettingsAndClearlyChangeTheVisibleMode() {
+    @Test fun pauseAndResumeStayInTheHeaderAndClearlyChangeTheVisibleMode() {
         screen()
         assertControls("Mettre la surveillance en pause")
         compose.onNodeWithContentDescription("Mettre la surveillance en pause").performClick()
@@ -85,9 +86,9 @@ class PauseInterfaceTest {
         assertTrue(calls.isEmpty())
     }
 
-    @Test fun narrowRoomHeaderKeepsBackMetricsPauseAndSettingsAccessible() {
+    @Test fun narrowRoomHeaderKeepsBackAndPauseAccessible() {
         screen(paused = true, back = true)
-        assertControls("Reprendre la surveillance")
+        assertControls("Reprendre la surveillance", dashboard = false)
         compose.onNodeWithContentDescription("Retour").assertIsDisplayed()
         compose.onNodeWithText("Écouter").assertIsDisplayed()
         compose.onNodeWithText("Interphone").assertIsDisplayed()

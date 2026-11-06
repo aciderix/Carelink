@@ -4,6 +4,7 @@ import org.json.JSONObject
 import java.util.UUID
 
 enum class DeviceRole { NONE, ROOM_UNIT, MONITOR_UNIT }
+enum class ThemeMode { DARK, LIGHT, SYSTEM }
 enum class RoomStatus { VERIFYING, CALM, ACTIVITY, ALERT, DISCONNECTED, MIC_ERROR, DEGRADED }
 enum class AlertEventType { SOUND_ALERT, DISCONNECTION, MIC_ERROR, LOW_BATTERY, SERVICE_INTERRUPTED, TEST }
 

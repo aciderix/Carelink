@@ -29,6 +29,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val pairingCode = MutableStateFlow<String?>(null)
     val peers = MutableStateFlow<List<String>>(emptyList())
     val pairingSeconds = MutableStateFlow(0)
+    private val _themeMode = MutableStateFlow(prefs.themeMode)
+    val themeMode = _themeMode.asStateFlow()
+    /** Room to open, requested by a notification tap; consumed by the UI. */
+    val openRoomRequest = MutableStateFlow<String?>(null)
+    fun setThemeMode(mode: ThemeMode) { prefs.themeMode = mode; _themeMode.value = mode }
     private var enrollmentJob: Job? = null
     private var resumed = false
     fun setCodeProtection(enabled: Boolean) {
@@ -82,7 +87,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 val address = NetworkUtils.getLocalIpAddress(context)
                 if (address.isBlank()) { message.value = "Connectez ce téléphone au Wi-Fi local avant d’ouvrir un QR"; return@launch }
                 pairingCode.value = pairing.createCode(SecureTransport(context).certificate(), address)
-                for (left in 120 downTo 1) { pairingSeconds.value = left; delay(1000); if (!pairing.enrollmentOpen()) { message.value = "Code fermé. Vérifiez la connexion sur les deux téléphones ; si elle n’apparaît pas, générez un nouveau QR."; break } }
+                var closed = false
+                for (left in 120 downTo 1) {
+                    pairingSeconds.value = left; delay(1000)
+                    if (!pairing.enrollmentOpen()) { closed = true; break }
+                }
+                // The code closes early only when a monitor consumed it (cancellation ends this job instead).
+                message.value = if (closed) "Code utilisé par un veilleur. Vérifiez sur le veilleur que la chambre apparaît connectée."
+                    else "QR expiré sans appairage. Générez un nouveau QR pour réessayer."
             } catch (_: Exception) { message.value = "Impossible de créer l’appairage sécurisé sur cet appareil" }
             finally { pairingCode.value = null; pairingSeconds.value = 0; pairing.cancelEnrollment(); reloadPeers() }
         }
