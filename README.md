@@ -4,9 +4,9 @@ Application Android de détection sonore et de communication sur réseau local, 
 
 ## Télécharger l’application
 
-L’APK est inclus dans le dépôt : **[CareLink 2.4.1 — télécharger](downloads/CareLink-2.4.1.apk)**. Depuis GitHub, ouvrir le fichier puis utiliser **Download raw file**. Le bouton **Code → Download ZIP** récupère aussi les sources et l’APK. Elle s’installe par-dessus la 2.4.0 ; depuis la 2.3.0, désinstaller d’abord l’ancienne CareLink puis refaire l’appairage (voir [downloads](downloads/README.md)).
+L’APK est inclus dans le dépôt : **[CareLink 2.4.2 — télécharger](downloads/CareLink-2.4.2.apk)**. Depuis GitHub, ouvrir le fichier puis utiliser **Download raw file**. Le bouton **Code → Download ZIP** récupère aussi les sources et l’APK. Elle s’installe par-dessus la 2.4.0 ou la 2.4.1 ; depuis la 2.3.0, désinstaller d’abord l’ancienne CareLink puis refaire l’appairage (voir [downloads](downloads/README.md)).
 
-- [Dossier de téléchargement](downloads/) et [empreinte SHA-256](downloads/CareLink-2.4.1.apk.sha256).
+- [Dossier de téléchargement](downloads/) et [empreinte SHA-256](downloads/CareLink-2.4.2.apk.sha256).
 - [Résultats de validation](docs/RESULTATS_VALIDATION.md) et [consignes de qualification](docs/VALIDATION.md).
 - [Aperçu de l’accueil](docs/screenshots/welcome.png) et [tableau de surveillance](docs/screenshots/monitor-empty.png), [tablette en paysage](docs/screenshots/monitor-tablet-landscape.png) et [fiche de chambre](docs/screenshots/room-tablet-landscape.png).
 
@@ -22,6 +22,13 @@ Sur Android, autoriser l’installation depuis la source utilisée pour téléch
 - Contrôles de fraîcheur, capture rendue silencieuse, silence numérique prolongé, erreurs et saturation. Le test de transmission ne prétend pas vérifier le microphone.
 - Interface sombre ou claire, navigation Surveillance / Événements / Réglages, protection optionnelle des actions sensibles par code et notifications sans acquittement accidentel depuis l’écran verrouillé.
 - Pas de SDK Firebase, pas de service cloud applicatif et pas d’enregistrement audio conservé.
+
+## Version 2.4.2 : microphone des tablettes anciennes
+
+- Sur certaines tablettes (Galaxy Tab A 2016, Android 8), la source micro standard renvoie un silence numérique parfait (réduction de bruit) ou refuse le format 16 kHz : la chambre affichait « Microphone indisponible ».
+- CareLink essaie désormais plusieurs sources dans l’ordre : micro standard, micro sans traitement (reconnaissance vocale), micro vidéo, puis les mêmes en 48 kHz ramenées à 16 kHz. La première source qui donne un vrai signal est mémorisée pour les démarrages suivants.
+- Une source qui ne renvoie que des zéros pendant 6 s est remplacée sans alerte (état « Vérification en cours » le temps de la bascule). Si toutes les sources restent muettes, le défaut est signalé comme avant, après 10 s.
+- La source utilisée est visible dans **Informations de l’appareil → Source micro** sur le téléphone chambre. Le niveau relatif peut différer selon la source : refaire l’essai sonore et ajuster le seuil si besoin.
 
 ## Version 2.4.1 : compatibilité Android 8 (tablettes anciennes)
 

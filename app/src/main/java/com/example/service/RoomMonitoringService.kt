@@ -19,7 +19,7 @@ class RoomMonitoringService : Service() {
         val currentDecibels: Int = 0, val thresholdDb: Int = 55, val status: RoomStatus = RoomStatus.VERIFYING,
         val isMicOperational: Boolean = false, val errorMessage: String? = null, val isCaregiverTalking: Boolean = false,
         val connectedMonitors: Int = 0, val captureAgeMs: Long = Long.MAX_VALUE, val samples: Long = 0,
-        val localAddress: String = "", val connectionDiagnostic: String? = null)
+        val localAddress: String = "", val connectionDiagnostic: String? = null, val captureSource: String = "")
     companion object {
         const val ACTION_START = "room.START"; const val ACTION_STOP = "room.STOP"
         const val ACTION_UPDATE_SETTINGS = "room.SETTINGS"; const val ACTION_TRIGGER_SPIKE = "room.TEST"
@@ -101,12 +101,12 @@ class RoomMonitoringService : Service() {
                         wake?.acquire(12 * 60 * 60 * 1000L); lastWakeRenewed = now
                     }
                     capture.thresholdDb = prefs.defaultSensitivityDb; capture.minNoiseDurationMs = prefs.minNoiseDurationMs
-                    if (!capture.isRecording && now >= retryAt) { capture.startCapture(); retryAt = now + 5000 }
+                    if (!capture.isRecording && (now >= retryAt || capture.switching)) { capture.startCapture(); retryAt = now + 5000 }
                     if (capture.isRecording && capture.captureAgeMs > 4000 && now - startedAt > 5000) capture.stopCapture()
                     val starting = capture.samplesCaptured == 0L && now - startedAt < 5000 && capture.errorMessage == null
-                    val error = if (starting) null else fatal ?: capture.diagnostic
+                    val error = if (starting || capture.switching) null else fatal ?: capture.diagnostic
                     val status = when {
-                        starting -> RoomStatus.VERIFYING
+                        starting || capture.switching -> RoomStatus.VERIFYING
                         fatal != null && capture.isRecording -> RoomStatus.DEGRADED
                         !capture.isOperational -> RoomStatus.MIC_ERROR
                         talking || error != null -> RoomStatus.DEGRADED
@@ -117,7 +117,7 @@ class RoomMonitoringService : Service() {
                     _state.value = RoomServiceState(true, prefs.installationId, prefs.roomName, capture.currentLevelDb,
                         prefs.defaultSensitivityDb, status, capture.isOperational, error, talking,
                         localServer.connectedMonitors, capture.captureAgeMs, capture.samplesCaptured,
-                        NetworkUtils.getLocalIpAddress(this@RoomMonitoringService), connectionDiagnostic)
+                        NetworkUtils.getLocalIpAddress(this@RoomMonitoringService), connectionDiagnostic, capture.sourceLabel)
                     // A flapping microphone must not flood the journal: one unchecked capture incident at a time.
                     if (error != null && error != lastError && !talking && !store.hasUncheckedEvent("room", AlertEventType.MIC_ERROR)) {
                         store.put("room", RoomAlertEvent(roomId = prefs.installationId, roomName = prefs.roomName,

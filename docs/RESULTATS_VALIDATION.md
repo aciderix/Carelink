@@ -1,15 +1,15 @@
-# Résultats de validation de CareLink 2.4.1
+# Résultats de validation de CareLink 2.4.2
 
 Vérifications locales effectuées le 6 novembre 2026, après la refonte visuelle.
 
 | Vérification | Résultat |
 | --- | --- |
 | Compilation de l’APK et de l’application de test | Réussite |
-| Tests JVM / Robolectric | 75 réussis, dont 2 en émulation Android 8 (API 26) ; 67 réussis en 2.4.0, aucun échec ni test ignoré (62 avant la refonte, tous réussis sur la version 2.3.0) |
+| Tests JVM / Robolectric | 78 réussis (dont choix et bascule de source micro), dont 2 en émulation Android 8 (API 26) ; 67 réussis en 2.4.0, aucun échec ni test ignoré (62 avant la refonte, tous réussis sur la version 2.3.0) |
 | Compilation des tests instrumentés | Réussite |
 | Analyse Android Lint | 0 erreur ; avertissements non bloquants |
 | Exécution instrumentée sur appareil | Non réalisée (aucun émulateur disponible) |
-| APK | `downloads/CareLink-2.4.1.apk`, signature vérifiée (apksigner), même clé que la 2.4.0 |
+| APK | `downloads/CareLink-2.4.2.apk`, signature vérifiée (apksigner), même clé que la 2.4.0 |
 
 Nouveaux contrôles : confirmation avant résolution depuis le tableau, vue d’ensemble au-dessus des chambres, absence d’engrenage en double, tri par urgence puis tri naturel, rendu des thèmes sombre et clair, liste d’événements groupés, verrou de l’incident microphone tant qu’il n’est pas pris en charge, délai croissant après codes erronés. Les captures sont dans [screenshots](screenshots/).
 

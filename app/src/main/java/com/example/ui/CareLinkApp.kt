@@ -708,6 +708,7 @@ private fun roomInformation(room: RoomUnitState, events: List<RoomAlertEvent>): 
         DisclosurePanel("Informations de l’appareil", information, { information = !information },
             summary = "Adresse, échantillons, dernière capture") {
             InfoRow("Adresse Wi-Fi", state.localAddress.ifBlank { "indisponible" })
+            InfoRow("Source micro", state.captureSource.ifBlank { "—" })
             InfoRow("Échantillons", state.samples.toString())
             InfoRow("Dernière capture", if (state.captureAgeMs == Long.MAX_VALUE) "aucune" else "il y a ${state.captureAgeMs / 1000} s")
             state.connectionDiagnostic?.let { Notice(it, Tone.WARNING) }
