@@ -1,0 +1,7 @@
+CareLink 2.0.1-debug
+
+Reconstruction propre sans cache : BUILD SUCCESSFUL — 86 tâches exécutées.
+Vérification finale après les ajustements : BUILD SUCCESSFUL.
+assembleDebug, testDebugUnitTest, assembleDebugAndroidTest, lintDebug : réussite.
+Lint ne signale pas d’erreur bloquante ; des avertissements subsistent.
+Signature de développement : identique à la version 2.0.0.

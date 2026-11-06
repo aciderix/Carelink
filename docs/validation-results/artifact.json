@@ -1,0 +1,20 @@
+{
+  "version": "2.3.0-debug",
+  "versionCode": 9,
+  "applicationId": "com.aistudio.cradlelink.vxrtw.debug",
+  "apk": "CareLink-2.3.0-debug.apk",
+  "bytes": 19452090,
+  "sha256": "67730bbd1f3ca029106c08818983369e9db061eba488a427ac5e116ed98f8aa3",
+  "jvm": {
+    "tests": 62,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "instrumented_tests": {
+    "compiled": 5,
+    "executed": 0,
+    "status": "not_run",
+    "reason": "prior_API35_emulator_startup_failure"
+  }
+}

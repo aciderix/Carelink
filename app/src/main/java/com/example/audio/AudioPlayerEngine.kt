@@ -1,65 +1,67 @@
 package com.example.audio
 
-import android.media.AudioAttributes
-import android.media.AudioFormat
-import android.media.AudioTrack
+import android.content.Context
+import android.media.*
+import android.os.Build
 
-class AudioPlayerEngine(private val sampleRate: Int = 16000) {
-
-    private var audioTrack: AudioTrack? = null
-
-    @Volatile
-    var isPlaying = false
-        private set
-
+class AudioPlayerEngine(private val context: Context, private val speaker: Boolean = false) : AutoCloseable {
+    private var track: AudioTrack? = null
+    private val manager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+    private var focus: AudioFocusRequest? = null
+    private var oldMode = AudioManager.MODE_NORMAL
+    @Volatile var isPlaying = false; private set
+    var onError: ((String) -> Unit)? = null
     fun start() {
         if (isPlaying) return
-
-        val minBufferSize = AudioTrack.getMinBufferSize(
-            sampleRate,
-            AudioFormat.CHANNEL_OUT_MONO,
-            AudioFormat.ENCODING_PCM_16BIT
-        ) * 2
-
+        val attributes = AudioAttributes.Builder().setUsage(if (speaker) AudioAttributes.USAGE_VOICE_COMMUNICATION else AudioAttributes.USAGE_MEDIA)
+            .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build()
         try {
-            audioTrack = AudioTrack.Builder()
-                .setAudioAttributes(
-                    AudioAttributes.Builder()
-                        .setUsage(AudioAttributes.USAGE_MEDIA)
-                        .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
-                        .build()
-                )
-                .setAudioFormat(
-                    AudioFormat.Builder()
-                        .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
-                        .setSampleRate(sampleRate)
-                        .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
-                        .build()
-                )
-                .setBufferSizeInBytes(minBufferSize)
-                .setTransferMode(AudioTrack.MODE_STREAM)
-                .build()
-
-            audioTrack?.play()
-            isPlaying = true
-        } catch (_: Exception) {
-            isPlaying = false
+            val listener = AudioManager.OnAudioFocusChangeListener { change ->
+                if (change < 0) { onError?.invoke("Écoute interrompue par une autre source audio"); close() }
+            }
+            val granted = if (Build.VERSION.SDK_INT >= 26) {
+                focus = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT).setAudioAttributes(attributes)
+                    .setOnAudioFocusChangeListener(listener).build()
+                manager.requestAudioFocus(focus!!)
+            } else {
+                @Suppress("DEPRECATION") manager.requestAudioFocus(listener, AudioManager.STREAM_VOICE_CALL, AudioManager.AUDIOFOCUS_GAIN_TRANSIENT)
+            }
+            check(granted == AudioManager.AUDIOFOCUS_REQUEST_GRANTED) { "Sortie audio indisponible" }
+            if (speaker) {
+                oldMode = manager.mode; manager.mode = AudioManager.MODE_IN_COMMUNICATION
+                if (Build.VERSION.SDK_INT >= 31) manager.availableCommunicationDevices.firstOrNull { it.type == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER }?.let { manager.setCommunicationDevice(it) }
+                else {
+                    @Suppress("DEPRECATION")
+                    manager.isSpeakerphoneOn = true
+                }
+            }
+            track = AudioTrack.Builder().setAudioAttributes(attributes).setAudioFormat(AudioFormat.Builder()
+                .setSampleRate(16000).setEncoding(AudioFormat.ENCODING_PCM_16BIT).setChannelMask(AudioFormat.CHANNEL_OUT_MONO).build())
+                .setBufferSizeInBytes(maxOf(4096, AudioTrack.getMinBufferSize(16000, AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_16BIT)))
+                .setTransferMode(AudioTrack.MODE_STREAM).build()
+            track!!.play(); isPlaying = true
+        } catch (e: Exception) { close(); throw e }
+    }
+    fun writeAudio(bytes: ByteArray) {
+        check(isPlaying) { "Écoute interrompue" }
+        var offset = 0
+        while (offset < bytes.size) {
+            val written = track?.write(bytes, offset, bytes.size - offset) ?: -1
+            check(written > 0) { "Erreur de lecture audio" }; offset += written
         }
     }
-
-    fun writeAudio(pcmBytes: ByteArray) {
-        if (!isPlaying || audioTrack == null) return
-        try {
-            audioTrack?.write(pcmBytes, 0, pcmBytes.size)
-        } catch (_: Exception) {}
-    }
-
-    fun stop() {
+    override fun close() {
         isPlaying = false
-        try {
-            audioTrack?.stop()
-            audioTrack?.release()
-        } catch (_: Exception) {}
-        audioTrack = null
+        runCatching { track?.stop() }; runCatching { track?.release() }; track = null
+        if (Build.VERSION.SDK_INT >= 26) focus?.let { manager.abandonAudioFocusRequest(it) }
+        focus = null
+        if (speaker) {
+            if (Build.VERSION.SDK_INT >= 31) manager.clearCommunicationDevice()
+            else {
+                @Suppress("DEPRECATION")
+                manager.isSpeakerphoneOn = false
+            }
+            manager.mode = oldMode
+        }
     }
 }

@@ -1,0 +1,7 @@
+CareLink 2.0.1-debug
+
+Compilation des 5 tests instrumentés : réussite.
+Exécution Android 15 / API 35 : non réalisée.
+Les émulateurs cloud essayés ne terminent pas leur initialisation ; le gestionnaire de paquets reste indisponible avant le lancement des tests. Aucun résultat positif d’exécution n’est revendiqué pour cette livraison.
+
+Les 4 tests Android API 28 de la version précédente 2.0.0 sont archivés séparément ; ils ne valident pas le nouvel APK.

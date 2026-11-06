@@ -1,0 +1,44 @@
+{
+  "renderer": "Robolectric API 34, native graphics",
+  "physical_devices_tested": false,
+  "cases": [
+    {
+      "qualifiers": "w360dp-h800dp-mdpi",
+      "checks": [
+        "header metric order",
+        "single room column",
+        "compact room controls",
+        "folded diagnostics",
+        "visible recovery actions"
+      ]
+    },
+    {
+      "qualifiers": "w800dp-h1280dp-port-mdpi",
+      "checks": [
+        "header metric order",
+        "two room columns",
+        "bedroom home split panels",
+        "shared inline room heading above aligned panels",
+        "visible pairing and sensitivity"
+      ]
+    },
+    {
+      "qualifiers": "w1280dp-h800dp-land-mdpi",
+      "checks": [
+        "header metric order",
+        "three room columns",
+        "navigation rail",
+        "room details split panels",
+        "shared inline room heading above aligned panels"
+      ]
+    },
+    {
+      "qualifiers": "w800dp-h360dp-land-mdpi",
+      "checks": [
+        "header metric order",
+        "navigation rail",
+        "visible room list"
+      ]
+    }
+  ]
+}

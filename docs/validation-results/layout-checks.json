@@ -1,0 +1,58 @@
+{
+  "renderer": "Robolectric API 34, native graphics",
+  "physical_devices_tested": false,
+  "cases": [
+    {
+      "qualifiers": "w360dp-h800dp-mdpi",
+      "checks": [
+        "header metric order",
+        "single room column",
+        "compact room controls",
+        "folded diagnostics",
+        "visible recovery actions",
+        "pause before settings",
+        "pause/resume controls",
+        "long press help",
+        "narrow room header"
+      ]
+    },
+    {
+      "qualifiers": "w800dp-h1280dp-port-mdpi",
+      "checks": [
+        "header metric order",
+        "two room columns",
+        "bedroom home split panels",
+        "shared inline room heading above aligned panels",
+        "visible pairing and sensitivity"
+      ]
+    },
+    {
+      "qualifiers": "w1280dp-h800dp-land-mdpi",
+      "checks": [
+        "header metric order",
+        "three room columns",
+        "navigation rail",
+        "room details split panels",
+        "shared inline room heading above aligned panels",
+        "paused tablet layout"
+      ]
+    },
+    {
+      "qualifiers": "w800dp-h360dp-land-mdpi",
+      "checks": [
+        "header metric order",
+        "navigation rail",
+        "visible room list"
+      ]
+    },
+    {
+      "qualifiers": "w360dp-h800dp-mdpi",
+      "font_scale": 1.3,
+      "checks": [
+        "pause before settings",
+        "header controls visible",
+        "paused mode visible"
+      ]
+    }
+  ]
+}

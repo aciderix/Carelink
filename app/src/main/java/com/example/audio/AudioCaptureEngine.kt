@@ -1,281 +1,131 @@
 package com.example.audio
 
+import android.Manifest
 import android.annotation.SuppressLint
 import android.content.Context
 import android.content.pm.PackageManager
-import android.media.AudioFormat
-import android.media.AudioRecord
-import android.media.MediaRecorder
+import android.media.*
+import android.os.Build
+import android.os.SystemClock
 import androidx.core.content.ContextCompat
-import com.example.model.AlertEventType
-import com.example.model.RoomAlertEvent
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.isActive
-import kotlinx.coroutines.launch
-import java.util.UUID
-import java.util.concurrent.ConcurrentLinkedQueue
-import java.util.concurrent.CopyOnWriteArrayList
+import com.example.model.*
+import kotlinx.coroutines.*
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlin.math.log10
-import kotlin.math.max
 import kotlin.math.sqrt
 
-class AudioCaptureEngine(
-    private val context: Context,
-    private val roomId: String,
-    private val roomNameProvider: () -> String
-) {
-
-    val sampleRate = 16000
-    private val channelConfig = AudioFormat.CHANNEL_IN_MONO
-    private val audioFormat = AudioFormat.ENCODING_PCM_16BIT
-
-    private var audioRecord: AudioRecord? = null
-    private var recordJob: Job? = null
-    private val scope = CoroutineScope(Dispatchers.IO)
-
-    @Volatile
-    var isRecording = false
-        private set
-
-    @Volatile
-    var isOperational = true
-        private set
-
-    @Volatile
-    var errorMessage: String? = null
-        private set
-
-    @Volatile
-    var currentLevelDb: Int = 0
-        private set
-
-    @Volatile
-    var thresholdDb: Int = 55
-
-    @Volatile
-    var minNoiseDurationMs: Int = 300
-
-    @Volatile
-    var isAlertActive: Boolean = false
-        private set
-
-    // Hysteresis & timing
-    private val hysteresisDb = 6
-    private val calmDelayMs = 1500L
-    private var noiseStartTime = 0L
-    private var belowThresholdStartTime = 0L
-    private var currentAlertStartTime = 0L
-
-    // Offline event buffer to store events during network outages
-    val offlineEventQueue = ConcurrentLinkedQueue<RoomAlertEvent>()
-
-    private val packetListeners = CopyOnWriteArrayList<(ByteArray) -> Unit>()
-    private val telemetryListeners = CopyOnWriteArrayList<(Int, Boolean, Boolean) -> Unit>() // levelDb, isAlert, isOperational
+class AudioCaptureEngine(private val context: Context, private val roomId: String, private val roomNameProvider: () -> String) {
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private var job: Job? = null
+    private val lifecycle = Mutex()
+    private var recorder: AudioRecord? = null
+    private val detector = AcousticDetector()
+    @Volatile var isRecording = false; private set
+    @Volatile var currentLevelDb = 0; private set
+    @Volatile var thresholdDb = 55
+    @Volatile var minNoiseDurationMs = 300
+    @Volatile var samplesCaptured = 0L; private set
+    @Volatile var lastSampleMs = 0L; private set
+    @Volatile var errorMessage: String? = "Capture non démarrée"; private set
+    @Volatile private var silenced = false
+    @Volatile private var zeroSince = 0L
+    @Volatile private var clipped = false
+    val isOperational get() = isRecording && !silenced && lastSampleMs > 0 &&
+        SystemClock.elapsedRealtime() - lastSampleMs < 2000 && !(zeroSince > 0 && SystemClock.elapsedRealtime() - zeroSince > 3000)
+    @Volatile var analysisPaused = false
+    val isAlertActive get() = detector.active
+    val captureAgeMs get() = if (lastSampleMs == 0L) Long.MAX_VALUE else SystemClock.elapsedRealtime() - lastSampleMs
+    val diagnostic: String? get() = when {
+        analysisPaused -> "Interphone actif : analyse acoustique suspendue"
+        !isRecording -> errorMessage ?: "Capture interrompue"
+        silenced -> "Capture rendue silencieuse par Android"
+        captureAgeMs >= 2000 -> "Aucun échantillon récent"
+        zeroSince > 0 && SystemClock.elapsedRealtime() - zeroSince > 3000 -> "Silence numérique prolongé : vérifier le microphone"
+        clipped -> "Saturation du microphone : vérifier le placement"
+        else -> null
+    }
+    var onPacket: ((ByteArray) -> Unit)? = null
     var onAlertTriggered: ((RoomAlertEvent) -> Unit)? = null
     var onCriticalError: ((String) -> Unit)? = null
 
-    fun addPacketListener(listener: (ByteArray) -> Unit) {
-        packetListeners.add(listener)
-    }
-
-    fun removePacketListener(listener: (ByteArray) -> Unit) {
-        packetListeners.remove(listener)
-    }
-
-    fun addTelemetryListener(listener: (Int, Boolean, Boolean) -> Unit) {
-        telemetryListeners.add(listener)
-    }
-
-    fun removeTelemetryListener(listener: (Int, Boolean, Boolean) -> Unit) {
-        telemetryListeners.remove(listener)
-    }
-
     @SuppressLint("MissingPermission")
-    fun startCapture() {
-        if (isRecording) return
-
-        val hasMicPermission = ContextCompat.checkSelfPermission(
-            context,
-            android.Manifest.permission.RECORD_AUDIO
-        ) == PackageManager.PERMISSION_GRANTED
-
-        if (!hasMicPermission) {
-            isOperational = false
-            errorMessage = "Permission microphone non accordée"
-            onCriticalError?.invoke("Permission microphone manquante")
-            notifyTelemetry(0, false, false)
-            return
-        }
-
-        val minBufferSize = AudioRecord.getMinBufferSize(sampleRate, channelConfig, audioFormat)
-        if (minBufferSize <= 0) {
-            isOperational = false
-            errorMessage = "Configuration audio non supportée sur cet appareil"
-            onCriticalError?.invoke("Matériel audio incompatible")
-            notifyTelemetry(0, false, false)
-            return
-        }
-
-        val bufferSize = max(minBufferSize, 2048)
-
-        try {
-            audioRecord = AudioRecord(
-                MediaRecorder.AudioSource.MIC,
-                sampleRate,
-                channelConfig,
-                audioFormat,
-                bufferSize
-            )
-
-            if (audioRecord?.state != AudioRecord.STATE_INITIALIZED) {
-                isOperational = false
-                errorMessage = "Échec d'initialisation du microphone"
-                onCriticalError?.invoke("Microphone inaccessible ou occupé")
-                notifyTelemetry(0, false, false)
-                return
-            }
-
-            audioRecord?.startRecording()
-            isRecording = true
-            isOperational = true
-            errorMessage = null
-
-            recordJob = scope.launch {
-                val audioBuffer = ShortArray(1024)
-                val byteBuffer = ByteArray(2048)
-
-                while (isActive && isRecording) {
-                    val readSamples = audioRecord?.read(audioBuffer, 0, audioBuffer.size) ?: 0
-                    if (readSamples > 0) {
-                        var sum = 0.0
-                        for (i in 0 until readSamples) {
-                            val sample = audioBuffer[i]
-                            sum += sample * sample
-                            byteBuffer[i * 2] = (sample.toInt() and 0xFF).toByte()
-                            byteBuffer[i * 2 + 1] = ((sample.toInt() shr 8) and 0xFF).toByte()
+    @Synchronized fun startCapture() {
+        if (job?.isActive == true) return
+        job = scope.launch { lifecycle.withLock {
+            var local: AudioRecord? = null
+            try {
+                check(ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) { "Permission microphone absente" }
+                val minimum = AudioRecord.getMinBufferSize(16000, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
+                check(minimum > 0) { "Format microphone indisponible" }
+                local = AudioRecord(MediaRecorder.AudioSource.MIC, 16000, AudioFormat.CHANNEL_IN_MONO,
+                    AudioFormat.ENCODING_PCM_16BIT, maxOf(minimum * 2, 4096))
+                recorder = local
+                check(local.state == AudioRecord.STATE_INITIALIZED) { "Microphone inaccessible" }
+                if (Build.VERSION.SDK_INT >= 29) local.registerAudioRecordingCallback(context.mainExecutor,
+                    object : AudioManager.AudioRecordingCallback() {
+                        override fun onRecordingConfigChanged(configs: MutableList<AudioRecordingConfiguration>) {
+                            silenced = local.activeRecordingConfiguration?.isClientSilenced == true
                         }
-                        val rms = sqrt(sum / readSamples)
-                        // Relative acoustic decibel scale: 18 dB (silence) to 95 dB (loud scream/call)
-                        val db = if (rms > 1.0) {
-                            (20.0 * log10(rms)).toInt().coerceIn(18, 95)
-                        } else {
-                            18
-                        }
-
-                        currentLevelDb = db
-                        processAcousticAnalysis(db)
-
-                        // Dispatch audio packet sequentially to registered listeners
-                        val packet = byteBuffer.copyOf(readSamples * 2)
-                        for (l in packetListeners) {
-                            try { l(packet) } catch (_: Exception) {}
-                        }
-                    } else if (readSamples < 0) {
-                        // Hardware error while recording
-                        isOperational = false
-                        errorMessage = "Erreur de lecture du flux microphone"
-                        onCriticalError?.invoke("Interruption du flux microphone")
-                        notifyTelemetry(0, false, false)
-                        break
+                    })
+                local.startRecording()
+                check(local.recordingState == AudioRecord.RECORDSTATE_RECORDING) { "Capture non démarrée" }
+                detector.reset(); silenced = false; lastSampleMs = 0; zeroSince = 0; isRecording = true; errorMessage = null
+                var episode: RoomAlertEvent? = null
+                var episodeStarted = 0L
+                var peakInEpisode = 0
+                val buffer = ShortArray(1024)
+                while (isActive) {
+                    val read = local.read(buffer, 0, buffer.size)
+                    check(read >= 0) { "Erreur microphone ($read)" }
+                    if (read == 0) { delay(20); continue }
+                    val now = SystemClock.elapsedRealtime()
+                    var sum = 0.0; var peak = 0
+                    val bytes = ByteArray(read * 2)
+                    for (i in 0 until read) {
+                        val n = buffer[i].toInt(); sum += n.toDouble() * n; peak = maxOf(peak, kotlin.math.abs(n))
+                        bytes[i * 2] = n.toByte(); bytes[i * 2 + 1] = (n shr 8).toByte()
                     }
+                    lastSampleMs = now; samplesCaptured += read
+                    if (peak == 0) { if (zeroSince == 0L) zeroSince = now } else zeroSince = 0
+                    clipped = peak >= 32760
+                    val rms = sqrt(sum / read)
+                    currentLevelDb = if (rms > 1) (20 * log10(rms)).toInt().coerceIn(0, 91) else 0
+                    if (Build.VERSION.SDK_INT >= 29) silenced = local.activeRecordingConfiguration?.isClientSilenced == true
+                    val wasActive = detector.active
+                    if (!analysisPaused && isOperational && detector.process(currentLevelDb, thresholdDb, minNoiseDurationMs, now)) {
+                        episodeStarted = now - minNoiseDurationMs
+                        peakInEpisode = currentLevelDb
+                        episode = RoomAlertEvent(roomId = roomId, roomName = roomNameProvider(),
+                            timestamp = System.currentTimeMillis() - minNoiseDurationMs,
+                            levelReachedDb = currentLevelDb, thresholdDb = thresholdDb, eventType = AlertEventType.SOUND_ALERT,
+                            notes = "Seuil relatif dépassé", remote = true)
+                        onAlertTriggered?.invoke(episode)
+                    }
+                    if (detector.active) peakInEpisode = maxOf(peakInEpisode, currentLevelDb)
+                    if (wasActive && (!detector.active || analysisPaused || !isOperational)) {
+                        episode?.let { onAlertTriggered?.invoke(it.copy(levelReachedDb = peakInEpisode,
+                            durationSeconds = ((now - episodeStarted) / 1000).toInt())) }
+                        episode = null
+                        if (analysisPaused || !isOperational) detector.reset()
+                    }
+                    if (!silenced) onPacket?.invoke(bytes)
                 }
+            } catch (e: CancellationException) { throw e }
+            catch (e: Exception) { errorMessage = e.message ?: "Capture interrompue"; onCriticalError?.invoke(errorMessage!!) }
+            finally {
+                isRecording = false; detector.reset()
+                runCatching { local?.stop() }; runCatching { local?.release() }
+                recorder = null
             }
-        } catch (e: Exception) {
-            isOperational = false
-            errorMessage = "Erreur microphone : ${e.message}"
-            onCriticalError?.invoke("Erreur microphone : ${e.message}")
-            notifyTelemetry(0, false, false)
-        }
+        } }
     }
-
-    private fun processAcousticAnalysis(db: Int) {
-        val now = System.currentTimeMillis()
-
-        if (db >= thresholdDb) {
-            belowThresholdStartTime = 0L
-            if (noiseStartTime == 0L) {
-                noiseStartTime = now
-            } else if (now - noiseStartTime >= minNoiseDurationMs) {
-                if (!isAlertActive) {
-                    isAlertActive = true
-                    currentAlertStartTime = now
-                    val alertEvent = RoomAlertEvent(
-                        eventId = UUID.randomUUID().toString(),
-                        roomId = roomId,
-                        roomName = roomNameProvider(),
-                        timestamp = now,
-                        levelReachedDb = db,
-                        thresholdDb = thresholdDb,
-                        eventType = AlertEventType.SOUND_ALERT,
-                        durationSeconds = 1,
-                        notes = "Bruit anormal (> $thresholdDb dB)"
-                    )
-                    offlineEventQueue.offer(alertEvent)
-                    onAlertTriggered?.invoke(alertEvent)
-                }
-            }
-        } else {
-            noiseStartTime = 0L
-            // Hysteresis: to clear alert, level must stay below (threshold - hysteresisDb)
-            if (db < (thresholdDb - hysteresisDb)) {
-                if (belowThresholdStartTime == 0L) {
-                    belowThresholdStartTime = now
-                } else if (now - belowThresholdStartTime >= calmDelayMs) {
-                    isAlertActive = false
-                    currentAlertStartTime = 0L
-                }
-            }
-        }
-
-        notifyTelemetry(db, isAlertActive, isOperational)
+    @Synchronized fun stopCapture() {
+        job?.cancel(); runCatching { recorder?.stop() }; isRecording = false
     }
-
-    private fun notifyTelemetry(db: Int, alert: Boolean, operational: Boolean) {
-        for (l in telemetryListeners) {
-            l(db, alert, operational)
-        }
-    }
-
-    fun stopCapture() {
-        isRecording = false
-        recordJob?.cancel()
-        recordJob = null
-        try {
-            audioRecord?.stop()
-            audioRecord?.release()
-        } catch (_: Exception) {}
-        audioRecord = null
-        currentLevelDb = 0
-        isAlertActive = false
-    }
-
-    fun drainOfflineEvents(): List<RoomAlertEvent> {
-        val list = mutableListOf<RoomAlertEvent>()
-        while (!offlineEventQueue.isEmpty()) {
-            offlineEventQueue.poll()?.let { list.add(it) }
-        }
-        return list
-    }
-
+    fun release() { stopCapture(); scope.cancel() }
     fun triggerManualNoiseSpike() {
-        val now = System.currentTimeMillis()
-        currentLevelDb = 78
-        isAlertActive = true
-        val alertEvent = RoomAlertEvent(
-            eventId = UUID.randomUUID().toString(),
-            roomId = roomId,
-            roomName = roomNameProvider(),
-            timestamp = now,
-            levelReachedDb = 78,
-            thresholdDb = thresholdDb,
-            eventType = AlertEventType.SOUND_ALERT,
-            durationSeconds = 3,
-            notes = "Test alerte acoustique"
-        )
-        offlineEventQueue.offer(alertEvent)
-        onAlertTriggered?.invoke(alertEvent)
-        notifyTelemetry(78, true, true)
+        onAlertTriggered?.invoke(RoomAlertEvent(roomId = roomId, roomName = roomNameProvider(),
+            thresholdDb = thresholdDb, eventType = AlertEventType.TEST, notes = "Test de transmission, sans validation du microphone", remote = true))
     }
 }
